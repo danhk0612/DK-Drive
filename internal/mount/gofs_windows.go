@@ -271,12 +271,6 @@ func (file *stagedFile) Stat() (os.FileInfo, error) {
 		mode = info.Mode()
 	}
 	modTime := file.modTime
-	if modTime.IsZero() && !file.dirty {
-		entry, statErr := file.filesystem.stat(file.name)
-		if statErr == nil {
-			modTime = entry.ModTime
-		}
-	}
 	if modTime.IsZero() || file.dirty {
 		modTime = info.ModTime()
 	}
@@ -461,6 +455,9 @@ type stagedInfo struct {
 func (info stagedInfo) Name() string       { return info.name }
 func (info stagedInfo) Mode() os.FileMode  { return info.mode }
 func (info stagedInfo) ModTime() time.Time { return info.modTime }
+
+// Sys must not expose the local staging file's Windows timestamps to gofs.
+func (stagedInfo) Sys() any { return nil }
 
 func cleanMountPath(name string) string {
 	name = strings.ReplaceAll(name, "\\", "/")
