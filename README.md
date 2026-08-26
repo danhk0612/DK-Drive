@@ -63,6 +63,8 @@ SFTP 원격 경로를 WinFsp 드라이브로 마운트하는 검증 방법은
 
 WebDAV 연결, 파일 작업과 WinFsp 마운트 검증 방법은
 [WebDAV 연결 기술 검증](docs/webdav-connection-spike.md)을 참고하세요.
+내일 실제 Synology와 Windows에서 순차 점검할 명령은
+[Synology WebDAV 통합 검증 체크리스트](docs/webdav-synology-validation.md)에 정리했습니다.
 
 ## 알려진 제한 사항
 
