@@ -45,10 +45,14 @@ go build -o bin/dkdrive.exe ./cmd/dkdrive
 WinFsp 메모리 마운트 검증 방법은
 [WinFsp 메모리 마운트 기술 검증](docs/winfsp-memory-spike.md)을 참고하세요.
 
+SFTP 연결과 원격 파일 읽기 검증 방법은
+[SFTP 연결 기술 검증](docs/sftp-connection-spike.md)을 참고하세요.
+
 ## 알려진 제한 사항
 
 - WinFsp 마운트는 메모리 기술 검증용 명령만 제공
-- SFTP, WebDAV, FTP/FTPS 백엔드 미구현
+- SFTP는 비밀번호 인증·목록·읽기 기술 검증 단계
+- WebDAV, FTP/FTPS 백엔드 미구현
 - GUI와 트레이 미구현
 - 캐시와 보안 자격 증명 저장 미구현
 
