@@ -25,6 +25,7 @@ type Config struct {
 	Port            uint16
 	Username        string
 	Password        string
+	Signer          ssh.Signer
 	Root            string
 	Timeout         time.Duration
 	HostKeyCallback ssh.HostKeyCallback
@@ -57,7 +58,7 @@ func New(ctx context.Context, config Config) (*Backend, error) {
 
 	sshConfig := &ssh.ClientConfig{
 		User:            config.Username,
-		Auth:            []ssh.AuthMethod{ssh.Password(config.Password)},
+		Auth:            authenticationMethods(config),
 		HostKeyCallback: config.HostKeyCallback,
 		Timeout:         config.Timeout,
 	}
@@ -104,13 +105,20 @@ func validateConfig(config Config) error {
 	if strings.TrimSpace(config.Username) == "" {
 		return errors.New("SFTP 사용자명이 필요합니다")
 	}
-	if config.Password == "" {
-		return errors.New("SFTP 비밀번호가 필요합니다")
+	if (config.Password == "") == (config.Signer == nil) {
+		return errors.New("SFTP 인증 방식은 비밀번호 또는 개인키 중 하나여야 합니다")
 	}
 	if config.HostKeyCallback == nil {
 		return errors.New("SFTP 호스트 키 검증 설정이 필요합니다")
 	}
 	return nil
+}
+
+func authenticationMethods(config Config) []ssh.AuthMethod {
+	if config.Signer != nil {
+		return []ssh.AuthMethod{ssh.PublicKeys(config.Signer)}
+	}
+	return []ssh.AuthMethod{ssh.Password(config.Password)}
 }
 
 func normalizeRoot(root string) string {

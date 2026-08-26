@@ -36,6 +36,20 @@ go build -o bin/dkdrive-sftp.exe ./cmd/dkdrive-sftp
 이 명령은 연결·목록·읽기만 검증한다. 쓰기와 WinFsp 마운트는 다음 단계에서
 별도로 연결한다.
 
+## 개인키 인증
+
+`-key`를 지정하면 비밀번호 대신 OpenSSH 개인키 인증을 사용한다.
+
+```powershell
+.\bin\dkdrive-sftp.exe `
+    -host example.com -port 22 -user tester -root /data `
+    -key "$HOME\.ssh\id_ed25519"
+```
+
+암호화된 개인키이면 `개인키 Passphrase:` 프롬프트가 나타나며 입력 내용은
+표시되지 않는다. 키 파일 내용과 Passphrase는 설정 파일이나 명령줄에
+저장하지 않는다.
+
 ## 검증 결과
 
 - 날짜: 2026-08-26

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
 
@@ -25,25 +26,14 @@ func main() {
 	root := flag.String("root", "/", "원격 시작 경로")
 	readPath := flag.String("read", "", "내용을 표준 출력할 원격 파일 경로")
 	writeTest := flag.Bool("write-test", false, "격리된 임시 폴더에서 쓰기 작업 검증")
+	privateKey := flag.String("key", "", "OpenSSH 개인키 파일 경로")
 	knownHosts := flag.String("known-hosts", defaultKnownHosts(), "known_hosts 파일")
 	flag.Parse()
 
-	password := os.Getenv("DKDRIVE_SFTP_PASSWORD")
-	if password == "" {
-		fmt.Fprint(os.Stderr, "SFTP 비밀번호: ")
-		input, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(os.Stderr)
-		if err != nil {
-			fatal("비밀번호 입력 실패: %v", err)
-		}
-		password = string(input)
-		if password == "" {
-			fatal("SFTP 비밀번호가 필요합니다")
-		}
-	}
 	if *host == "" || *username == "" || *port == 0 || *port > 65535 {
 		fatal("-host, -user와 올바른 -port 값이 필요합니다")
 	}
+	password, signer := authentication(*privateKey)
 
 	hostKeyCallback, err := knownhosts.New(*knownHosts)
 	if err != nil {
@@ -57,6 +47,7 @@ func main() {
 		Port:            uint16(*port),
 		Username:        *username,
 		Password:        password,
+		Signer:          signer,
 		Root:            *root,
 		Timeout:         10 * time.Second,
 		HostKeyCallback: hostKeyCallback,
@@ -96,6 +87,40 @@ func main() {
 		}
 		fmt.Printf("%s %12d %s %s\n", kind, entry.Size, entry.ModTime.Format(time.RFC3339), entry.Name)
 	}
+}
+
+func authentication(privateKey string) (string, ssh.Signer) {
+	if privateKey == "" {
+		password := os.Getenv("DKDRIVE_SFTP_PASSWORD")
+		if password == "" {
+			password = readSecret("SFTP 비밀번호: ", "비밀번호")
+		}
+		return password, nil
+	}
+
+	signer, err := sftpbackend.LoadPrivateKey(privateKey, nil)
+	var passphraseMissing *ssh.PassphraseMissingError
+	if errors.As(err, &passphraseMissing) {
+		passphrase := readSecret("개인키 Passphrase: ", "개인키 Passphrase")
+		signer, err = sftpbackend.LoadPrivateKey(privateKey, []byte(passphrase))
+	}
+	if err != nil {
+		fatal("개인키 인증 설정 실패: %v", err)
+	}
+	return "", signer
+}
+
+func readSecret(prompt, name string) string {
+	fmt.Fprint(os.Stderr, prompt)
+	input, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		fatal("%s 입력 실패: %v", name, err)
+	}
+	if len(input) == 0 {
+		fatal("%s가 필요합니다", name)
+	}
+	return string(input)
 }
 
 type writeTestBackend interface {

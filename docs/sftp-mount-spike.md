@@ -19,6 +19,9 @@ go build -o bin/dkdrive-sftp-mount.exe ./cmd/dkdrive-sftp-mount
 등록된 `known_hosts` 파일로 호스트 키를 검증하며 비밀번호는 화면에 표시하지
 않고 입력받는다. 마운트를 해제하려면 실행 중인 창에서 `Ctrl+C`를 누른다.
 
+개인키 인증은 비밀번호 대신 `-key "$HOME\.ssh\id_ed25519"`를 지정한다.
+암호화된 개인키는 Passphrase를 화면에 표시하지 않고 입력받는다.
+
 ## 1차 점검 순서
 
 마운트 후 별도 PowerShell 창에서 다음과 같이 격리된 폴더를 사용한다.
