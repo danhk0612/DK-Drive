@@ -24,6 +24,10 @@ const operationTimeout = 30 * time.Second
 // NewGoFileSystem adapts the protocol-neutral backend to go-winfsp's gofs
 // boundary. Writable files are staged locally and uploaded on Sync or Close.
 func NewGoFileSystem(backend vfs.Backend, readOnly bool, cacheStore *localcache.Store) gofs.FileSystem {
+	return newGoFileSystem(backend, readOnly, cacheStore)
+}
+
+func newGoFileSystem(backend vfs.Backend, readOnly bool, cacheStore *localcache.Store) *goFileSystem {
 	return &goFileSystem{backend: backend, readOnly: readOnly, cacheStore: cacheStore}
 }
 
@@ -31,6 +35,7 @@ type goFileSystem struct {
 	backend    vfs.Backend
 	readOnly   bool
 	cacheStore *localcache.Store
+	openFiles  sync.Map
 }
 
 func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode) (gofs.File, error) {
@@ -88,7 +93,7 @@ func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode
 
 	dirty := !exists || flag&os.O_TRUNC != 0
 	removeTemporary = false
-	return &stagedFile{
+	file := &stagedFile{
 		File:           local,
 		filesystem:     filesystem,
 		name:           name,
@@ -97,7 +102,9 @@ func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode
 		modTime:        entry.ModTime,
 		dirty:          dirty,
 		writePermitted: flag&(os.O_WRONLY|os.O_RDWR) != 0,
-	}, nil
+	}
+	filesystem.openFiles.Store(file, struct{}{})
+	return file, nil
 }
 
 func (filesystem *goFileSystem) Mkdir(name string, _ os.FileMode) error {
@@ -135,6 +142,32 @@ func (filesystem *goFileSystem) stat(name string) (vfs.Entry, error) {
 	ctx, cancel := operationContext()
 	defer cancel()
 	return filesystem.backend.Stat(ctx, name)
+}
+
+func (filesystem *goFileSystem) setModTime(name string, modTime time.Time) error {
+	ctx, cancel := operationContext()
+	defer cancel()
+	if err := filesystem.backend.SetModTime(ctx, name, modTime); err != nil {
+		return err
+	}
+
+	var updateErr error
+	filesystem.openFiles.Range(func(key, _ any) bool {
+		file := key.(*stagedFile)
+		if file.name == name {
+			if err := file.setModTime(modTime); err != nil && updateErr == nil {
+				updateErr = err
+			}
+		}
+		return true
+	})
+	return updateErr
+}
+
+func (filesystem *goFileSystem) setBackendModTime(name string, modTime time.Time) error {
+	ctx, cancel := operationContext()
+	defer cancel()
+	return filesystem.backend.SetModTime(ctx, name, modTime)
 }
 
 func (filesystem *goFileSystem) download(name, destination string) error {
@@ -206,6 +239,7 @@ type stagedFile struct {
 	modTime        time.Time
 	dirty          bool
 	writePermitted bool
+	requestedTime  time.Time
 	closed         bool
 	mutex          sync.Mutex
 }
@@ -226,6 +260,8 @@ func (file *stagedFile) Truncate(size int64) error {
 }
 
 func (file *stagedFile) Stat() (os.FileInfo, error) {
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
 	info, err := file.File.Stat()
 	if err != nil {
 		return nil, err
@@ -260,8 +296,17 @@ func (file *stagedFile) Sync() error {
 	if err := file.filesystem.upload(file.name, file.File); err != nil {
 		return err
 	}
+	if !file.requestedTime.IsZero() {
+		if err := file.filesystem.setBackendModTime(file.name, file.requestedTime); err != nil {
+			return err
+		}
+	}
 	file.dirty = false
-	file.modTime = time.Now()
+	if file.requestedTime.IsZero() {
+		file.modTime = time.Now()
+	} else {
+		file.modTime = file.requestedTime
+	}
 	return nil
 }
 
@@ -275,15 +320,33 @@ func (file *stagedFile) Close() error {
 	file.closed = true
 	closeErr := file.File.Close()
 	file.mutex.Unlock()
+	file.filesystem.openFiles.Delete(file)
 	if syncErr == nil {
 		return errors.Join(closeErr, os.Remove(file.temporaryPath))
 	}
 	return errors.Join(syncErr, closeErr)
 }
 
+func (file *stagedFile) setModTime(modTime time.Time) error {
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	if file.closed {
+		return os.ErrClosed
+	}
+	if err := os.Chtimes(file.temporaryPath, modTime, modTime); err != nil {
+		return err
+	}
+	file.modTime = modTime
+	file.requestedTime = modTime
+	return nil
+}
+
 func (file *stagedFile) markDirty() {
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
 	if file.writePermitted {
 		file.dirty = true
+		file.requestedTime = time.Time{}
 	}
 }
 

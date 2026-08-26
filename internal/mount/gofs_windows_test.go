@@ -44,12 +44,46 @@ func TestNewMetadataBehaviourWrapsGoFS(t *testing.T) {
 		t.Fatalf("cache.New(): %v", err)
 	}
 	backend := &stagingBackend{}
-	base, err := gofs.NewOptions(NewGoFileSystem(backend, false, store))
+	filesystem := newGoFileSystem(backend, false, store)
+	base, err := gofs.NewOptions(filesystem)
 	if err != nil {
 		t.Fatalf("gofs.NewOptions(): %v", err)
 	}
-	if _, err := NewMetadataBehaviour(base, backend, false); err != nil {
+	if _, err := NewMetadataBehaviour(base, filesystem, false); err != nil {
 		t.Fatalf("NewMetadataBehaviour(): %v", err)
+	}
+}
+
+func TestSetModTimeUpdatesOpenStagingFile(t *testing.T) {
+	store, err := localcache.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("cache.New(): %v", err)
+	}
+	backend := &stagingBackend{}
+	filesystem := newGoFileSystem(backend, false, store)
+	file, err := filesystem.OpenFile("new.txt", os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("OpenFile(): %v", err)
+	}
+	if _, err := file.Write([]byte("test")); err != nil {
+		t.Fatalf("Write(): %v", err)
+	}
+	want := time.Date(2026, time.January, 2, 3, 4, 6, 0, time.UTC)
+	if err := filesystem.setModTime("new.txt", want); err != nil {
+		t.Fatalf("setModTime(): %v", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatalf("Stat(): %v", err)
+	}
+	if !info.ModTime().Equal(want) {
+		t.Fatalf("ModTime() = %v, want %v", info.ModTime(), want)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close(): %v", err)
+	}
+	if !backend.modTime.Equal(want) {
+		t.Fatalf("backend modTime = %v, want %v", backend.modTime, want)
 	}
 }
 
@@ -114,6 +148,7 @@ func assertCacheEntryCount(t *testing.T, directory string, want int) {
 
 type stagingBackend struct {
 	openWriteErr error
+	modTime      time.Time
 }
 
 func (backend *stagingBackend) Stat(context.Context, string) (vfs.Entry, error) {
@@ -144,7 +179,8 @@ func (backend *stagingBackend) Remove(context.Context, string, bool) error {
 func (backend *stagingBackend) Rename(context.Context, string, string) error {
 	return nil
 }
-func (backend *stagingBackend) SetModTime(context.Context, string, time.Time) error {
+func (backend *stagingBackend) SetModTime(_ context.Context, _ string, modTime time.Time) error {
+	backend.modTime = modTime
 	return nil
 }
 func (backend *stagingBackend) SetReadOnly(context.Context, string, bool) error {

@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"github.com/winfsp/go-winfsp"
+	"github.com/winfsp/go-winfsp/gofs"
 	"golang.org/x/sys/windows"
-
-	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
 type goFSBehaviour interface {
@@ -41,17 +40,21 @@ type goFSBehaviour interface {
 // callbacks when this adapter is passed to winfsp.Mount.
 type metadataBehaviour struct {
 	goFSBehaviour
-	backend  vfs.Backend
-	readOnly bool
-	handles  sync.Map
+	filesystem *goFileSystem
+	readOnly   bool
+	handles    sync.Map
 }
 
-func NewMetadataBehaviour(inner winfsp.BehaviourBase, backend vfs.Backend, readOnly bool) (winfsp.BehaviourBase, error) {
+func NewMetadataBehaviour(inner winfsp.BehaviourBase, filesystem gofs.FileSystem, readOnly bool) (winfsp.BehaviourBase, error) {
 	delegate, ok := inner.(goFSBehaviour)
 	if !ok {
 		return nil, fmt.Errorf("지원되지 않는 gofs 동작 집합: %T", inner)
 	}
-	return &metadataBehaviour{goFSBehaviour: delegate, backend: backend, readOnly: readOnly}, nil
+	mountFileSystem, ok := filesystem.(*goFileSystem)
+	if !ok {
+		return nil, fmt.Errorf("지원되지 않는 마운트 파일시스템: %T", filesystem)
+	}
+	return &metadataBehaviour{goFSBehaviour: delegate, filesystem: mountFileSystem, readOnly: readOnly}, nil
 }
 
 func (behaviour *metadataBehaviour) Open(
@@ -128,19 +131,19 @@ func (behaviour *metadataBehaviour) SetBasicInfo(
 	defer cancel()
 
 	if flags&winfsp.SetBasicInfoAttributes != 0 {
-		entry, err := behaviour.backend.Stat(ctx, name)
+		entry, err := behaviour.filesystem.backend.Stat(ctx, name)
 		if err != nil {
 			return err
 		}
 		if !entry.IsDir() {
 			readOnly := attributes&windows.FILE_ATTRIBUTE_READONLY != 0
-			if err := behaviour.backend.SetReadOnly(ctx, name, readOnly); err != nil {
+			if err := behaviour.filesystem.backend.SetReadOnly(ctx, name, readOnly); err != nil {
 				return err
 			}
 		}
 	}
 	if flags&winfsp.SetBasicInfoLastWriteTime != 0 {
-		if err := behaviour.backend.SetModTime(ctx, name, filetimeToTime(lastWriteTime)); err != nil {
+		if err := behaviour.filesystem.setModTime(name, filetimeToTime(lastWriteTime)); err != nil {
 			return err
 		}
 	}
