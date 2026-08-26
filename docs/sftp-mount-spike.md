@@ -22,6 +22,21 @@ go build -o bin/dkdrive-sftp-mount.exe ./cmd/dkdrive-sftp-mount
 개인키 인증은 비밀번호 대신 `-key "$HOME\.ssh\id_ed25519"`를 지정한다.
 암호화된 개인키는 Passphrase를 화면에 표시하지 않고 입력받는다.
 
+## 기본 캐시 폴더
+
+파일 읽기와 쓰기에 필요한 로컬 스테이징 파일은 기본적으로
+`%LOCALAPPDATA%\DKDrive\Cache`에 생성한다. `-cache-dir`로 다른 경로를
+지정할 수 있다.
+
+```powershell
+.\bin\dkdrive-sftp-mount.exe `
+    -host example.com -port 22 -user tester -root /data `
+    -key "$HOME\.ssh\id_ed25519" -cache-dir 'D:\DKDriveCache' -mount X:
+```
+
+서버 반영에 성공하거나 읽기가 끝난 스테이징 파일은 즉시 삭제한다. 업로드가
+실패한 파일은 데이터 보존을 위해 캐시 폴더에 남긴다.
+
 ## 읽기 전용 마운트
 
 `-read-only`를 지정하면 파일과 폴더의 생성·쓰기·삭제·이름 변경·이동·수정
@@ -53,11 +68,12 @@ Windows 탐색기에서도 폴더 목록, 파일 생성, 메모장 저장, 이�
 
 ## 현재 제한 사항
 
-- 열린 파일은 시스템 임시 폴더에 준비한 뒤 WinFsp `Flush` 또는 파일 닫기
+- 열린 파일은 DKDrive 캐시 폴더에 준비한 뒤 WinFsp `Flush` 또는 파일 닫기
   시점에 SFTP로 반영한다.
 - 반영 실패 시 데이터 보존을 위해 임시 파일을 삭제하지 않지만 복구 UI는
   아직 없다.
-- 진행 중인 파일 전송의 중간 지점 재개, 캐시 관리와 충돌 처리는 아직 구현하지 않았다.
+- 진행 중인 파일 전송의 중간 지점 재개, 읽기 캐시 만료·용량 제한·자동 정리와
+  충돌 처리는 아직 구현하지 않았다.
 - 쓰기 권한이 없는 원격 시작 경로에서는 조회만 가능하고 파일 작업은 실패한다.
 - 현재 SFTP 서버의 경로 규칙에 맞춰 파일명의 대소문자를 구분한다.
 
