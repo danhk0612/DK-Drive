@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh/knownhosts"
+	"golang.org/x/term"
 
 	sftpbackend "github.com/danhk0612/DK-Drive/internal/protocol/sftp"
 )
@@ -25,7 +26,16 @@ func main() {
 
 	password := os.Getenv("DKDRIVE_SFTP_PASSWORD")
 	if password == "" {
-		fatal("DKDRIVE_SFTP_PASSWORD 환경변수에 테스트 비밀번호를 설정하세요")
+		fmt.Fprint(os.Stderr, "SFTP 비밀번호: ")
+		input, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			fatal("비밀번호 입력 실패: %v", err)
+		}
+		password = string(input)
+		if password == "" {
+			fatal("SFTP 비밀번호가 필요합니다")
+		}
 	}
 	if *host == "" || *username == "" || *port == 0 || *port > 65535 {
 		fatal("-host, -user와 올바른 -port 값이 필요합니다")
