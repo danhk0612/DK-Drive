@@ -1,0 +1,21 @@
+package mount
+
+import (
+	"context"
+	"errors"
+
+	"github.com/danhk0612/DK-Drive/internal/vfs"
+)
+
+var ErrNotImplemented = errors.New("WinFsp 마운트 기술 검증이 아직 구현되지 않았습니다")
+
+type Options struct {
+	DriveLetter string
+	VolumeName  string
+	ReadOnly    bool
+}
+
+type Manager interface {
+	Mount(ctx context.Context, backend vfs.Backend, options Options) error
+	Unmount(ctx context.Context, driveLetter string) error
+}
