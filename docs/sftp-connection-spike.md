@@ -68,6 +68,7 @@ go build -o bin/dkdrive-sftp.exe ./cmd/dkdrive-sftp
 - 환경: Synology DSM SFTP 서버
 - 통과: Ed25519 공개키 인증
 - 통과: DKDrive `-key` 옵션으로 연결과 원격 디렉터리 목록 조회
+- 통과: 암호화된 Ed25519 개인키와 숨김 Passphrase 입력
 - 확인: 비밀번호 인증 방식의 기존 동작 유지
 
 Synology의 사용자 홈, `.ssh`, `authorized_keys` 경로가 다른 사용자에게 쓰기
