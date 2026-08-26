@@ -61,3 +61,23 @@ $WebDAVRoot = '/home/'
 ```
 
 IP 주소와 인증서 이름이 일치하지 않으면 HTTPS 인증서 검증이 실패할 수 있다. 이 경우 인증서에 포함된 NAS 호스트 이름을 `-host`에 사용한다.
+
+## WinFsp 마운트 검증
+
+연결과 기본 쓰기 검증이 모두 통과한 뒤 마운트 실행 파일을 빌드한다.
+
+```powershell
+go build -o bin/dkdrive-webdav-mount.exe ./cmd/dkdrive-webdav-mount
+
+.\bin\dkdrive-webdav-mount.exe `
+    -scheme https `
+    -host $WebDAVHost `
+    -port $WebDAVPort `
+    -user $WebDAVUser `
+    -root $WebDAVRoot `
+    -mount 'X:'
+```
+
+현재 WebDAV 마운트의 수정 시간 설정과 파일별 ReadOnly 속성 변경은 구현되지 않았다. 서버별 지원 범위를 확인하기 전에는 해당 속성 변경을 테스트하지 않는다.
+
+연결 전체를 읽기 전용으로 마운트할 때는 `-read-only`를 추가한다.
