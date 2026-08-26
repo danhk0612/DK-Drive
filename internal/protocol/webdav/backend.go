@@ -11,9 +11,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danhk0612/DK-Drive/internal/vfs"
@@ -46,6 +48,7 @@ type Backend struct {
 	baseURL  *url.URL
 	username string
 	password string
+	timeout  time.Duration
 }
 
 func New(ctx context.Context, config Config) (*Backend, error) {
@@ -64,7 +67,10 @@ func New(ctx context.Context, config Config) (*Backend, error) {
 		Host:   net.JoinHostPort(config.Host, strconv.Itoa(int(config.Port))),
 		Path:   normalizeRoot(config.Root),
 	}
-	backend := &Backend{client: client, baseURL: baseURL, username: config.Username, password: config.Password}
+	backend := &Backend{
+		client: client, baseURL: baseURL, username: config.Username,
+		password: config.Password, timeout: config.Timeout,
+	}
 	entries, err := backend.propfind(ctx, ".", "0")
 	if err != nil {
 		return nil, fmt.Errorf("WebDAV 원격 시작 경로 확인 실패: %w", err)
@@ -221,20 +227,38 @@ func (backend *Backend) OpenRead(ctx context.Context, name string) (io.ReadClose
 	return response.Body, nil
 }
 
-func (backend *Backend) OpenWrite(context.Context, string, vfs.WriteOptions) (vfs.WriteHandle, error) {
-	return nil, unsupported("파일 쓰기")
+func (backend *Backend) Mkdir(ctx context.Context, name string) error {
+	resource, err := backend.resourceURL(name)
+	if err != nil {
+		return err
+	}
+	return backend.execute(ctx, "MKCOL", resource, nil, http.StatusCreated)
 }
 
-func (backend *Backend) Mkdir(context.Context, string) error {
-	return unsupported("폴더 생성")
+func (backend *Backend) Remove(ctx context.Context, name string, _ bool) error {
+	resource, err := backend.resourceURL(name)
+	if err != nil {
+		return err
+	}
+	return backend.execute(ctx, http.MethodDelete, resource, nil, http.StatusOK, http.StatusNoContent)
 }
 
-func (backend *Backend) Remove(context.Context, string, bool) error {
-	return unsupported("삭제")
-}
-
-func (backend *Backend) Rename(context.Context, string, string) error {
-	return unsupported("이동 및 이름 변경")
+func (backend *Backend) Rename(ctx context.Context, oldName, newName string) error {
+	source, err := backend.resourceURL(oldName)
+	if err != nil {
+		return err
+	}
+	destination, err := backend.resourceURL(newName)
+	if err != nil {
+		return err
+	}
+	request, err := backend.newRequest(ctx, "MOVE", source, nil)
+	if err != nil {
+		return fmt.Errorf("WebDAV MOVE 요청 생성 실패: %w", err)
+	}
+	request.Header.Set("Destination", destination.String())
+	request.Header.Set("Overwrite", "F")
+	return backend.do(request, http.StatusCreated, http.StatusNoContent)
 }
 
 func (backend *Backend) SetModTime(context.Context, string, time.Time) error {
@@ -250,6 +274,28 @@ func (backend *Backend) Close() error {
 	return nil
 }
 
+func (backend *Backend) execute(ctx context.Context, method string, resource *url.URL, body io.Reader, statuses ...int) error {
+	request, err := backend.newRequest(ctx, method, resource, body)
+	if err != nil {
+		return fmt.Errorf("WebDAV %s 요청 생성 실패: %w", method, err)
+	}
+	return backend.do(request, statuses...)
+}
+
+func (backend *Backend) do(request *http.Request, statuses ...int) error {
+	response, err := backend.client.Do(request)
+	if err != nil {
+		return fmt.Errorf("WebDAV %s 요청 실패: %w", request.Method, err)
+	}
+	defer response.Body.Close()
+	for _, status := range statuses {
+		if response.StatusCode == status {
+			return nil
+		}
+	}
+	return responseError(request.Method, response)
+}
+
 func unsupported(operation string) error {
 	return fmt.Errorf("WebDAV %s: %w", operation, errors.ErrUnsupported)
 }
@@ -257,10 +303,139 @@ func unsupported(operation string) error {
 func responseError(method string, response *http.Response) error {
 	message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 	detail := strings.TrimSpace(string(message))
-	if detail == "" {
-		return fmt.Errorf("WebDAV %s 응답: %s", method, response.Status)
+	message := fmt.Sprintf("WebDAV %s 응답: %s", method, response.Status)
+	if detail != "" {
+		message += ": " + detail
 	}
-	return fmt.Errorf("WebDAV %s 응답: %s: %s", method, response.Status, detail)
+	switch response.StatusCode {
+	case http.StatusNotFound:
+		return fmt.Errorf("%s: %w", message, fs.ErrNotExist)
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusLocked:
+		return fmt.Errorf("%s: %w", message, fs.ErrPermission)
+	case http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return fmt.Errorf("%s: %w", message, errors.ErrUnsupported)
+	default:
+		return errors.New(message)
+	}
+}
+
+type putHandle struct {
+	mutex    sync.Mutex
+	backend  *Backend
+	resource *url.URL
+	file     *os.File
+	path     string
+	append   bool
+	dirty    bool
+	closed   bool
+}
+
+func (backend *Backend) OpenWrite(ctx context.Context, name string, options vfs.WriteOptions) (vfs.WriteHandle, error) {
+	resource, err := backend.resourceURL(name)
+	if err != nil {
+		return nil, err
+	}
+	temporary, err := os.CreateTemp("", "dkdrive-webdav-*")
+	if err != nil {
+		return nil, fmt.Errorf("WebDAV 쓰기 임시 파일 생성 실패: %w", err)
+	}
+	handle := &putHandle{
+		backend: backend, resource: resource, file: temporary, path: temporary.Name(),
+		append: options.Append, dirty: options.Truncate,
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			temporary.Close()
+			os.Remove(temporary.Name())
+		}
+	}()
+
+	if !options.Truncate {
+		reader, openErr := backend.OpenRead(ctx, name)
+		if openErr == nil {
+			_, copyErr := io.Copy(temporary, reader)
+			closeErr := reader.Close()
+			if err := errors.Join(copyErr, closeErr); err != nil {
+				return nil, fmt.Errorf("WebDAV 기존 파일 임시 저장 실패: %w", err)
+			}
+		} else if !options.Create || !errors.Is(openErr, fs.ErrNotExist) {
+			return nil, openErr
+		} else {
+			handle.dirty = true
+		}
+	} else if !options.Create {
+		if _, err := backend.Stat(ctx, name); err != nil {
+			return nil, err
+		}
+	}
+	cleanup = false
+	return handle, nil
+}
+
+func (handle *putHandle) WriteAt(data []byte, offset int64) (int, error) {
+	handle.mutex.Lock()
+	defer handle.mutex.Unlock()
+	if handle.closed {
+		return 0, os.ErrClosed
+	}
+	if handle.append {
+		info, err := handle.file.Stat()
+		if err != nil {
+			return 0, err
+		}
+		offset = info.Size()
+	}
+	written, err := handle.file.WriteAt(data, offset)
+	if written > 0 {
+		handle.dirty = true
+	}
+	return written, err
+}
+
+func (handle *putHandle) Sync() error {
+	handle.mutex.Lock()
+	defer handle.mutex.Unlock()
+	return handle.syncLocked()
+}
+
+func (handle *putHandle) syncLocked() error {
+	if handle.closed {
+		return os.ErrClosed
+	}
+	if err := handle.file.Sync(); err != nil {
+		return err
+	}
+	if !handle.dirty {
+		return nil
+	}
+	info, err := handle.file.Stat()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), handle.backend.timeout)
+	defer cancel()
+	request, err := handle.backend.newRequest(ctx, http.MethodPut, handle.resource, io.NewSectionReader(handle.file, 0, info.Size()))
+	if err != nil {
+		return fmt.Errorf("WebDAV PUT 요청 생성 실패: %w", err)
+	}
+	request.ContentLength = info.Size()
+	if err := handle.backend.do(request, http.StatusOK, http.StatusCreated, http.StatusNoContent); err != nil {
+		return err
+	}
+	handle.dirty = false
+	return nil
+}
+
+func (handle *putHandle) Close() error {
+	handle.mutex.Lock()
+	defer handle.mutex.Unlock()
+	if handle.closed {
+		return os.ErrClosed
+	}
+	syncErr := handle.syncLocked()
+	handle.closed = true
+	return errors.Join(syncErr, handle.file.Close(), os.Remove(handle.path))
 }
 
 type multistatusResponse struct {

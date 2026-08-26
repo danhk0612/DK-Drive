@@ -10,7 +10,7 @@
 - `GET`으로 파일 읽기
 - 한글과 공백이 포함된 URL 경로 인코딩
 
-쓰기 작업인 `MKCOL`, `PUT`, `MOVE`, `DELETE`와 선택 기능인 `LOCK`, `UNLOCK`은 연결·목록·읽기 실서버 검증 후 순차적으로 추가한다.
+코드와 모의 서버 자동 테스트에는 `MKCOL`, `PUT`, `MOVE`, `DELETE`가 구현되어 있다. Synology 실서버 동작은 아직 검증하지 않았다. 선택 기능인 `LOCK`, `UNLOCK`은 기본 파일 작업 검증 후 지원 여부를 확인한다.
 
 ## 보안 기준
 
@@ -46,6 +46,18 @@ $WebDAVRoot = '/home/'
     -user $WebDAVUser `
     -root $WebDAVRoot `
     -read 'my.cnf'
+```
+
+마지막으로 격리된 임시 폴더에서 생성, 쓰기, 읽기, 이동, 이름 변경, 삭제를 검증한다.
+
+```powershell
+.\bin\dkdrive-webdav.exe `
+    -scheme https `
+    -host $WebDAVHost `
+    -port $WebDAVPort `
+    -user $WebDAVUser `
+    -root $WebDAVRoot `
+    -write-test
 ```
 
 IP 주소와 인증서 이름이 일치하지 않으면 HTTPS 인증서 검증이 실패할 수 있다. 이 경우 인증서에 포함된 NAS 호스트 이름을 `-host`에 사용한다.

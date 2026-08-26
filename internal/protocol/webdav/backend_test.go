@@ -2,14 +2,18 @@ package webdav
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
 func TestBackendListsAndReads(t *testing.T) {
@@ -63,6 +67,87 @@ func TestResourceURLRejectsParentTraversal(t *testing.T) {
 	backend := Backend{baseURL: mustURL(t, "https://example.test/dav/home")}
 	if _, err := backend.resourceURL("../secret"); err == nil {
 		t.Fatal("resourceURL() returned nil error")
+	}
+}
+
+func TestBackendWritesMovesAndDeletes(t *testing.T) {
+	var uploaded string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == "PROPFIND" && request.URL.Path == "/dav/home":
+			writeMultistatus(writer, `<d:response><d:href>/dav/home/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`)
+		case request.Method == "MKCOL" && request.URL.Path == "/dav/home/test":
+			writer.WriteHeader(http.StatusCreated)
+		case request.Method == http.MethodPut && request.URL.Path == "/dav/home/test/source.txt":
+			data, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			uploaded = string(data)
+			writer.WriteHeader(http.StatusCreated)
+		case request.Method == "MOVE" && request.URL.Path == "/dav/home/test/source.txt":
+			if !strings.HasSuffix(request.Header.Get("Destination"), "/dav/home/test/moved.txt") {
+				t.Errorf("Destination = %q", request.Header.Get("Destination"))
+			}
+			writer.WriteHeader(http.StatusCreated)
+		case request.Method == http.MethodDelete && (request.URL.Path == "/dav/home/test/moved.txt" || request.URL.Path == "/dav/home/test"):
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(writer, "unexpected request", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	backend := newTestBackend(t, server.URL, "tester", "secret")
+	defer backend.Close()
+	ctx := context.Background()
+	if err := backend.Mkdir(ctx, "test"); err != nil {
+		t.Fatalf("Mkdir(): %v", err)
+	}
+	handle, err := backend.OpenWrite(ctx, "test/source.txt", vfs.WriteOptions{Create: true, Truncate: true})
+	if err != nil {
+		t.Fatalf("OpenWrite(): %v", err)
+	}
+	if _, err := handle.WriteAt([]byte("DKDrive WebDAV"), 0); err != nil {
+		t.Fatalf("WriteAt(): %v", err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("Close(): %v", err)
+	}
+	if uploaded != "DKDrive WebDAV" {
+		t.Fatalf("uploaded = %q", uploaded)
+	}
+	if err := backend.Rename(ctx, "test/source.txt", "test/moved.txt"); err != nil {
+		t.Fatalf("Rename(): %v", err)
+	}
+	if err := backend.Remove(ctx, "test/moved.txt", false); err != nil {
+		t.Fatalf("Remove(file): %v", err)
+	}
+	if err := backend.Remove(ctx, "test", true); err != nil {
+		t.Fatalf("Remove(directory): %v", err)
+	}
+}
+
+func TestResponseErrorMapsFileSystemErrors(t *testing.T) {
+	tests := []struct {
+		status int
+		want   error
+	}{
+		{status: http.StatusNotFound, want: fs.ErrNotExist},
+		{status: http.StatusUnauthorized, want: fs.ErrPermission},
+		{status: http.StatusForbidden, want: fs.ErrPermission},
+		{status: http.StatusLocked, want: fs.ErrPermission},
+		{status: http.StatusMethodNotAllowed, want: errors.ErrUnsupported},
+	}
+	for _, test := range tests {
+		response := &http.Response{
+			StatusCode: test.status,
+			Status:     fmt.Sprintf("%d test", test.status),
+			Body:       io.NopCloser(strings.NewReader("detail")),
+		}
+		if err := responseError("TEST", response); !errors.Is(err, test.want) {
+			t.Errorf("responseError(%d) = %v, want %v", test.status, err, test.want)
+		}
 	}
 }
 

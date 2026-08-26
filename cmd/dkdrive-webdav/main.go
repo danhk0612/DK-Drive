@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"time"
 
 	"golang.org/x/term"
 
 	webdavbackend "github.com/danhk0612/DK-Drive/internal/protocol/webdav"
+	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
 func main() {
@@ -20,6 +23,7 @@ func main() {
 	username := flag.String("user", "", "WebDAV 사용자명")
 	root := flag.String("root", "/", "원격 시작 경로")
 	readPath := flag.String("read", "", "내용을 표준 출력할 원격 파일 경로")
+	writeTest := flag.Bool("write-test", false, "격리된 임시 폴더에서 쓰기 작업 검증")
 	flag.Parse()
 
 	if *host == "" || *username == "" || *port == 0 || *port > 65535 {
@@ -40,6 +44,12 @@ func main() {
 		fatal("연결 실패: %v", err)
 	}
 	defer backend.Close()
+	if *writeTest {
+		if err := runWriteTest(ctx, backend); err != nil {
+			fatal("쓰기 검증 실패: %v", err)
+		}
+		return
+	}
 
 	if *readPath != "" {
 		file, err := backend.OpenRead(ctx, *readPath)
@@ -64,6 +74,79 @@ func main() {
 		}
 		fmt.Printf("%s %12d %s %s\n", kind, entry.Size, entry.ModTime.Format(time.RFC3339), entry.Name)
 	}
+}
+
+type writeTestBackend interface {
+	Mkdir(context.Context, string) error
+	OpenWrite(context.Context, string, vfs.WriteOptions) (vfs.WriteHandle, error)
+	OpenRead(context.Context, string) (io.ReadCloser, error)
+	Rename(context.Context, string, string) error
+	Remove(context.Context, string, bool) error
+}
+
+func runWriteTest(ctx context.Context, backend writeTestBackend) error {
+	root := "DKDrive WebDAV 쓰기 테스트 " + time.Now().Format("20060102-150405")
+	subdirectory := path.Join(root, "이동 대상")
+	original := path.Join(root, "원본 파일.txt")
+	moved := path.Join(subdirectory, "이름 변경 파일.txt")
+	data := []byte("DKDrive WebDAV 쓰기 검증\n")
+
+	fmt.Printf("임시 테스트 경로 생성: %s\n", root)
+	if err := backend.Mkdir(ctx, root); err != nil {
+		return fmt.Errorf("임시 폴더 생성: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if !cleanup {
+			return
+		}
+		backend.Remove(context.Background(), moved, false)
+		backend.Remove(context.Background(), original, false)
+		backend.Remove(context.Background(), subdirectory, true)
+		backend.Remove(context.Background(), root, true)
+	}()
+	if err := backend.Mkdir(ctx, subdirectory); err != nil {
+		return fmt.Errorf("하위 폴더 생성: %w", err)
+	}
+	handle, err := backend.OpenWrite(ctx, original, vfs.WriteOptions{Create: true, Truncate: true, Mode: 0o644})
+	if err != nil {
+		return fmt.Errorf("파일 생성: %w", err)
+	}
+	written, writeErr := handle.WriteAt(data, 0)
+	if writeErr == nil && written != len(data) {
+		writeErr = io.ErrShortWrite
+	}
+	closeErr := handle.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return fmt.Errorf("파일 쓰기 완료: %w", err)
+	}
+	reader, err := backend.OpenRead(ctx, original)
+	if err != nil {
+		return fmt.Errorf("작성 파일 열기: %w", err)
+	}
+	readData, readErr := io.ReadAll(reader)
+	closeReadErr := reader.Close()
+	if err := errors.Join(readErr, closeReadErr); err != nil {
+		return fmt.Errorf("작성 파일 읽기: %w", err)
+	}
+	if string(readData) != string(data) {
+		return errors.New("작성 후 읽은 파일 내용이 일치하지 않습니다")
+	}
+	if err := backend.Rename(ctx, original, moved); err != nil {
+		return fmt.Errorf("파일 이동 및 이름 변경: %w", err)
+	}
+	if err := backend.Remove(ctx, moved, false); err != nil {
+		return fmt.Errorf("파일 삭제: %w", err)
+	}
+	if err := backend.Remove(ctx, subdirectory, true); err != nil {
+		return fmt.Errorf("하위 폴더 삭제: %w", err)
+	}
+	if err := backend.Remove(ctx, root, true); err != nil {
+		return fmt.Errorf("임시 폴더 삭제: %w", err)
+	}
+	cleanup = false
+	fmt.Println("WebDAV 생성, 쓰기, 읽기 검증, 이동, 이름 변경, 삭제 통과")
+	return nil
 }
 
 func readSecret(prompt string) string {
