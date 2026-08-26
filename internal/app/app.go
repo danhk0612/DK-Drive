@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const Version = "0.1.0-dev"
+const Version = "0.2.0-dev"
 
 func Run(args []string) error {
 	return run(args, os.Stdout)
@@ -15,7 +15,7 @@ func Run(args []string) error {
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		_, err := fmt.Fprintf(output, "DKDrive %s\n0.1 기술 검증 단계: 아직 드라이브를 마운트하지 않습니다.\n", Version)
+		_, err := fmt.Fprintf(output, "DKDrive %s\n0.2 SFTP 기본 기능 개발 단계입니다.\n", Version)
 		return err
 	}
 
