@@ -27,6 +27,7 @@ func main() {
 	readPath := flag.String("read", "", "내용을 표준 출력할 원격 파일 경로")
 	writeTest := flag.Bool("write-test", false, "격리된 임시 폴더에서 쓰기 작업 검증")
 	showCapabilities := flag.Bool("capabilities", false, "서버가 광고하는 WebDAV 기능 조회")
+	lockTest := flag.Bool("lock-test", false, "격리된 임시 파일에서 LOCK/UNLOCK 검증")
 	flag.Parse()
 
 	if *host == "" || *username == "" || *port == 0 || *port > 65535 {
@@ -67,6 +68,12 @@ func main() {
 		}
 		return
 	}
+	if *lockTest {
+		if err := runLockTest(ctx, backend); err != nil {
+			fatal("잠금 검증 실패: %v", err)
+		}
+		return
+	}
 
 	if *readPath != "" {
 		file, err := backend.OpenRead(ctx, *readPath)
@@ -91,6 +98,48 @@ func main() {
 		}
 		fmt.Printf("%s %12d %s %s\n", kind, entry.Size, entry.ModTime.Format(time.RFC3339), entry.Name)
 	}
+}
+
+type lockTestBackend interface {
+	OpenWrite(context.Context, string, vfs.WriteOptions) (vfs.WriteHandle, error)
+	Lock(context.Context, string, time.Duration) (string, error)
+	Unlock(context.Context, string, string) error
+	Remove(context.Context, string, bool) error
+}
+
+func runLockTest(ctx context.Context, backend lockTestBackend) error {
+	name := "DKDrive WebDAV 잠금 테스트 " + time.Now().Format("20060102-150405") + ".txt"
+	handle, err := backend.OpenWrite(ctx, name, vfs.WriteOptions{Create: true, Truncate: true, Mode: 0o644})
+	if err != nil {
+		return fmt.Errorf("잠금 테스트 파일 생성: %w", err)
+	}
+	if _, err := handle.WriteAt([]byte("DKDrive WebDAV LOCK 검증\n"), 0); err != nil {
+		handle.Close()
+		return fmt.Errorf("잠금 테스트 파일 쓰기: %w", err)
+	}
+	if err := handle.Close(); err != nil {
+		return fmt.Errorf("잠금 테스트 파일 완료: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			backend.Remove(context.Background(), name, false)
+		}
+	}()
+
+	token, err := backend.Lock(ctx, name, 60*time.Second)
+	if err != nil {
+		return err
+	}
+	if err := backend.Unlock(ctx, name, token); err != nil {
+		return err
+	}
+	if err := backend.Remove(ctx, name, false); err != nil {
+		return fmt.Errorf("잠금 테스트 파일 삭제: %w", err)
+	}
+	cleanup = false
+	fmt.Println("WebDAV LOCK, UNLOCK 통과")
+	return nil
 }
 
 type writeTestBackend interface {

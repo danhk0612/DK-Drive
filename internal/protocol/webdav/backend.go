@@ -32,6 +32,13 @@ const propfindBody = `<?xml version="1.0" encoding="utf-8"?>
   </d:prop>
 </d:propfind>`
 
+const lockBody = `<?xml version="1.0" encoding="utf-8"?>
+<d:lockinfo xmlns:d="DAV:">
+  <d:lockscope><d:exclusive/></d:lockscope>
+  <d:locktype><d:write/></d:locktype>
+  <d:owner><d:href>DKDrive</d:href></d:owner>
+</d:lockinfo>`
+
 type Config struct {
 	Scheme     string
 	Host       string
@@ -175,6 +182,65 @@ func (backend *Backend) Capabilities(ctx context.Context) (Capabilities, error) 
 		}
 	}
 	return capabilities, nil
+}
+
+func (backend *Backend) Lock(ctx context.Context, name string, timeout time.Duration) (string, error) {
+	resource, err := backend.resourceURL(name)
+	if err != nil {
+		return "", err
+	}
+	request, err := backend.newRequest(ctx, "LOCK", resource, bytes.NewBufferString(lockBody))
+	if err != nil {
+		return "", fmt.Errorf("WebDAV LOCK 요청 생성 실패: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/xml; charset=utf-8")
+	request.Header.Set("Depth", "0")
+	seconds := int64(timeout / time.Second)
+	if seconds < 1 {
+		seconds = 60
+	}
+	request.Header.Set("Timeout", fmt.Sprintf("Second-%d", seconds))
+	response, err := backend.client.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("WebDAV LOCK 요청 실패: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
+		return "", responseError("LOCK", response)
+	}
+	token := normalizeLockToken(response.Header.Get("Lock-Token"))
+	if token == "" {
+		var body lockResponse
+		if err := xml.NewDecoder(response.Body).Decode(&body); err != nil {
+			return "", fmt.Errorf("WebDAV LOCK 응답 해석 실패: %w", err)
+		}
+		token = normalizeLockToken(body.LockDiscovery.ActiveLock.LockToken.Href)
+	}
+	if token == "" {
+		return "", errors.New("WebDAV LOCK 응답에 잠금 토큰이 없습니다")
+	}
+	return token, nil
+}
+
+func (backend *Backend) Unlock(ctx context.Context, name, token string) error {
+	resource, err := backend.resourceURL(name)
+	if err != nil {
+		return err
+	}
+	token = normalizeLockToken(token)
+	if token == "" {
+		return errors.New("WebDAV UNLOCK에는 잠금 토큰이 필요합니다")
+	}
+	request, err := backend.newRequest(ctx, "UNLOCK", resource, nil)
+	if err != nil {
+		return fmt.Errorf("WebDAV UNLOCK 요청 생성 실패: %w", err)
+	}
+	request.Header.Set("Lock-Token", "<"+token+">")
+	return backend.do(request, http.StatusOK, http.StatusNoContent)
+}
+
+func normalizeLockToken(token string) string {
+	return strings.TrimSpace(strings.Trim(strings.TrimSpace(token), "<>"))
 }
 
 func (backend *Backend) ReadDir(ctx context.Context, name string) ([]vfs.Entry, error) {
@@ -496,6 +562,16 @@ type davProperty struct {
 
 type davResourceType struct {
 	Collection *struct{} `xml:"collection"`
+}
+
+type lockResponse struct {
+	LockDiscovery struct {
+		ActiveLock struct {
+			LockToken struct {
+				Href string `xml:"href"`
+			} `xml:"locktoken"`
+		} `xml:"activelock"`
+	} `xml:"lockdiscovery"`
 }
 
 type davEntry struct {

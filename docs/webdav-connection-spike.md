@@ -72,6 +72,18 @@ $WebDAVRoot = '/home/'
     -write-test
 ```
 
+기능 조회 결과에 DAV 클래스 `2`와 `LOCK`, `UNLOCK`이 포함되면 격리된 임시 파일로 잠금을 검증한다.
+
+```powershell
+.\bin\dkdrive-webdav.exe `
+    -scheme https `
+    -host $WebDAVHost `
+    -port $WebDAVPort `
+    -user $WebDAVUser `
+    -root $WebDAVRoot `
+    -lock-test
+```
+
 IP 주소와 인증서 이름이 일치하지 않으면 HTTPS 인증서 검증이 실패할 수 있다. 이 경우 인증서에 포함된 NAS 호스트 이름을 `-host`에 사용한다.
 
 ## WinFsp 마운트 검증

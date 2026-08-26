@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
@@ -181,6 +182,43 @@ func TestCapabilities(t *testing.T) {
 		if !capabilities.Methods[method] {
 			t.Errorf("method %s not reported", method)
 		}
+	}
+}
+
+func TestLockAndUnlock(t *testing.T) {
+	const token = "opaquelocktoken:dkdrive-test"
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method {
+		case "PROPFIND":
+			writeMultistatus(writer, `<d:response><d:href>/dav/home/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`)
+		case "LOCK":
+			if request.Header.Get("Depth") != "0" || request.Header.Get("Timeout") != "Second-60" {
+				t.Errorf("LOCK headers: Depth=%q Timeout=%q", request.Header.Get("Depth"), request.Header.Get("Timeout"))
+			}
+			writer.Header().Set("Lock-Token", "<"+token+">")
+			writer.WriteHeader(http.StatusOK)
+		case "UNLOCK":
+			if request.Header.Get("Lock-Token") != "<"+token+">" {
+				t.Errorf("Lock-Token = %q", request.Header.Get("Lock-Token"))
+			}
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(writer, "unexpected request", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	backend := newTestBackend(t, server.URL, "tester", "secret")
+	defer backend.Close()
+	got, err := backend.Lock(context.Background(), "lock.txt", 60*time.Second)
+	if err != nil {
+		t.Fatalf("Lock(): %v", err)
+	}
+	if got != token {
+		t.Fatalf("token = %q, want %q", got, token)
+	}
+	if err := backend.Unlock(context.Background(), "lock.txt", got); err != nil {
+		t.Fatalf("Unlock(): %v", err)
 	}
 }
 
