@@ -67,7 +67,7 @@ func main() {
 
 	behaviour, err := gofs.NewOptions(
 		mount.NewGoFileSystem(backend),
-		gofs.WithCaseInsensitive(true),
+		gofs.WithCaseInsensitive(false),
 		gofs.WithAttribReadOnlyTransMode(gofs.AttribReadOnlyBypass),
 	)
 	if err != nil {
