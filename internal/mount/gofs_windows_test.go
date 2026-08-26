@@ -87,6 +87,31 @@ func TestSetModTimeUpdatesOpenStagingFile(t *testing.T) {
 	}
 }
 
+func TestStagedFileStatFallsBackToRemoteModTime(t *testing.T) {
+	want := time.Date(2026, time.January, 2, 3, 4, 6, 0, time.UTC)
+	entry := vfs.Entry{Name: "existing.txt", Size: 4, Mode: 0o644, ModTime: want}
+	backend := &stagingBackend{statEntry: &entry}
+	local, err := os.CreateTemp(t.TempDir(), "staged-*")
+	if err != nil {
+		t.Fatalf("CreateTemp(): %v", err)
+	}
+	defer local.Close()
+	file := &stagedFile{
+		File:          local,
+		filesystem:    &goFileSystem{backend: backend},
+		name:          "existing.txt",
+		temporaryPath: local.Name(),
+		mode:          entry.Mode,
+	}
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatalf("Stat(): %v", err)
+	}
+	if !info.ModTime().Equal(want) {
+		t.Fatalf("ModTime() = %v, want %v", info.ModTime(), want)
+	}
+}
+
 func TestFiletimeToTime(t *testing.T) {
 	want := time.Date(2026, time.January, 2, 3, 4, 6, 0, time.UTC)
 	filetime := syscall.NsecToFiletime(want.UnixNano())
@@ -149,9 +174,13 @@ func assertCacheEntryCount(t *testing.T, directory string, want int) {
 type stagingBackend struct {
 	openWriteErr error
 	modTime      time.Time
+	statEntry    *vfs.Entry
 }
 
 func (backend *stagingBackend) Stat(context.Context, string) (vfs.Entry, error) {
+	if backend.statEntry != nil {
+		return *backend.statEntry, nil
+	}
 	return vfs.Entry{}, os.ErrNotExist
 }
 

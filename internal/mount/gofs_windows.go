@@ -271,6 +271,12 @@ func (file *stagedFile) Stat() (os.FileInfo, error) {
 		mode = info.Mode()
 	}
 	modTime := file.modTime
+	if modTime.IsZero() && !file.dirty {
+		entry, statErr := file.filesystem.stat(file.name)
+		if statErr == nil {
+			modTime = entry.ModTime
+		}
+	}
 	if modTime.IsZero() || file.dirty {
 		modTime = info.ModTime()
 	}
