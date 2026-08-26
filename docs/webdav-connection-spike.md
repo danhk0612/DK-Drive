@@ -1,0 +1,51 @@
+# WebDAV 연결 기술 검증
+
+## 현재 범위
+
+- HTTP 및 HTTPS
+- Basic 사용자명/비밀번호 인증
+- 호스트, 포트, 원격 시작 경로
+- `PROPFIND` Depth 0으로 시작 경로 확인
+- `PROPFIND` Depth 1로 디렉터리 목록 조회
+- `GET`으로 파일 읽기
+- 한글과 공백이 포함된 URL 경로 인코딩
+
+쓰기 작업인 `MKCOL`, `PUT`, `MOVE`, `DELETE`와 선택 기능인 `LOCK`, `UNLOCK`은 연결·목록·읽기 실서버 검증 후 순차적으로 추가한다.
+
+## 보안 기준
+
+Basic 인증 자체는 자격 증명을 암호화하지 않는다. 외부 네트워크에서는 신뢰할 수 있는 인증서가 설정된 HTTPS를 사용한다. 현재 구현은 운영체제 인증서 저장소로 서버 인증서를 검증하며 인증서 검증 우회 옵션을 제공하지 않는다.
+
+## Synology 검증 절차
+
+Synology WebDAV Server의 기본 포트는 HTTP 5005, HTTPS 5006이며 설정에서 변경할 수 있다. 아래 예시는 HTTPS 5006을 사용한다.
+
+```powershell
+go build -o bin/dkdrive-webdav.exe ./cmd/dkdrive-webdav
+
+$WebDAVHost = '192.168.0.150'
+$WebDAVPort = 5006
+$WebDAVUser = 'danhk0612'
+$WebDAVRoot = '/home/'
+
+.\bin\dkdrive-webdav.exe `
+    -scheme https `
+    -host $WebDAVHost `
+    -port $WebDAVPort `
+    -user $WebDAVUser `
+    -root $WebDAVRoot
+```
+
+목록이 확인되면 실제 존재하는 파일을 읽는다.
+
+```powershell
+.\bin\dkdrive-webdav.exe `
+    -scheme https `
+    -host $WebDAVHost `
+    -port $WebDAVPort `
+    -user $WebDAVUser `
+    -root $WebDAVRoot `
+    -read 'my.cnf'
+```
+
+IP 주소와 인증서 이름이 일치하지 않으면 HTTPS 인증서 검증이 실패할 수 있다. 이 경우 인증서에 포함된 NAS 호스트 이름을 `-host`에 사용한다.
