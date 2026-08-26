@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -142,6 +143,26 @@ func TestRemotePath(t *testing.T) {
 		}
 		if got != test.want {
 			t.Errorf("remotePath(%q) = %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
+func TestIsConnectionError(t *testing.T) {
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{err: io.EOF, want: true},
+		{err: io.ErrUnexpectedEOF, want: true},
+		{err: net.ErrClosed, want: true},
+		{err: errors.New("write: broken pipe"), want: true},
+		{err: errors.New("connection reset by peer"), want: true},
+		{err: os.ErrNotExist, want: false},
+		{err: os.ErrPermission, want: false},
+	}
+	for _, test := range tests {
+		if got := isConnectionError(test.err); got != test.want {
+			t.Errorf("isConnectionError(%v) = %v, want %v", test.err, got, test.want)
 		}
 	}
 }
