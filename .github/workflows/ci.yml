@@ -30,8 +30,8 @@ jobs:
             throw 'gofmt changes are required.'
           }
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Resolve dependencies
+        run: go mod tidy
 
       - name: Print generated module sums
         shell: pwsh
