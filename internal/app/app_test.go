@@ -16,6 +16,17 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestDefaultMessageShowsCurrentStage(t *testing.T) {
+	var output bytes.Buffer
+	if err := run(nil, &output); err != nil {
+		t.Fatalf("run(): %v", err)
+	}
+	message := output.String()
+	if !strings.Contains(message, Version) || !strings.Contains(message, "0.3 WebDAV") {
+		t.Fatalf("default output = %q", message)
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	var output bytes.Buffer
 	if err := run([]string{"unknown"}, &output); err == nil {
