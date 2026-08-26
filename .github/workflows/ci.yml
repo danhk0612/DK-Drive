@@ -30,6 +30,13 @@ jobs:
             throw 'gofmt changes are required.'
           }
 
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Print generated module sums
+        shell: pwsh
+        run: Get-Content go.sum
+
       - name: Test
         run: go test ./...
 
