@@ -67,7 +67,7 @@ func main() {
 		modeName = "읽기 전용 모드"
 	}
 	behaviour, err := gofs.NewOptions(
-		mount.NewGoFileSystem(mountBackend),
+		mount.NewGoFileSystem(mountBackend, *readOnly),
 		gofs.WithCaseInsensitive(false),
 		gofs.WithAttribReadOnlyTransMode(attributeMode),
 	)

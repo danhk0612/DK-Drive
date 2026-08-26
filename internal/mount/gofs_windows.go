@@ -22,15 +22,19 @@ const operationTimeout = 30 * time.Second
 
 // NewGoFileSystem adapts the protocol-neutral backend to go-winfsp's gofs
 // boundary. Writable files are staged locally and uploaded on Sync or Close.
-func NewGoFileSystem(backend vfs.Backend) gofs.FileSystem {
-	return &goFileSystem{backend: backend}
+func NewGoFileSystem(backend vfs.Backend, readOnly bool) gofs.FileSystem {
+	return &goFileSystem{backend: backend, readOnly: readOnly}
 }
 
 type goFileSystem struct {
-	backend vfs.Backend
+	backend  vfs.Backend
+	readOnly bool
 }
 
 func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode) (gofs.File, error) {
+	if filesystem.readOnly && flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0 {
+		return nil, vfs.ErrReadOnly
+	}
 	name = cleanMountPath(name)
 	entry, statErr := filesystem.stat(name)
 	if statErr == nil && entry.IsDir() {
