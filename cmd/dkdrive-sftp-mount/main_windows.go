@@ -21,6 +21,7 @@ import (
 
 	"github.com/danhk0612/DK-Drive/internal/mount"
 	sftpbackend "github.com/danhk0612/DK-Drive/internal/protocol/sftp"
+	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
 func main() {
@@ -30,6 +31,7 @@ func main() {
 	root := flag.String("root", "/", "원격 시작 경로")
 	mountpoint := flag.String("mount", "X:", "마운트할 드라이브 문자(예: X:)")
 	privateKey := flag.String("key", "", "OpenSSH 개인키 파일 경로")
+	readOnly := flag.Bool("read-only", false, "원격 드라이브의 변경 작업 차단")
 	knownHosts := flag.String("known-hosts", defaultKnownHosts(), "known_hosts 파일")
 	flag.Parse()
 
@@ -56,10 +58,18 @@ func main() {
 	}
 	defer backend.Close()
 
+	mountBackend := vfs.Backend(backend)
+	attributeMode := gofs.AttribReadOnlyBypass
+	modeName := "읽기/쓰기 모드"
+	if *readOnly {
+		mountBackend = vfs.NewReadOnlyBackend(backend)
+		attributeMode = gofs.AttribReadOnlyAlways
+		modeName = "읽기 전용 모드"
+	}
 	behaviour, err := gofs.NewOptions(
-		mount.NewGoFileSystem(backend),
+		mount.NewGoFileSystem(mountBackend),
 		gofs.WithCaseInsensitive(false),
-		gofs.WithAttribReadOnlyTransMode(gofs.AttribReadOnlyBypass),
+		gofs.WithAttribReadOnlyTransMode(attributeMode),
 	)
 	if err != nil {
 		fatal("WinFsp 파일시스템 구성 실패: %v", err)
@@ -71,7 +81,7 @@ func main() {
 	}
 	defer filesystem.Unmount()
 
-	fmt.Printf("DKDrive SFTP 파일시스템을 %s에 마운트했습니다. 종료하려면 Ctrl+C를 누르세요.\n", letter)
+	fmt.Printf("DKDrive SFTP 파일시스템을 %s에 %s로 마운트했습니다. 종료하려면 Ctrl+C를 누르세요.\n", letter, modeName)
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 	<-interrupt

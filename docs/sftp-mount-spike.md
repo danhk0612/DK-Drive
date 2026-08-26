@@ -22,6 +22,17 @@ go build -o bin/dkdrive-sftp-mount.exe ./cmd/dkdrive-sftp-mount
 개인키 인증은 비밀번호 대신 `-key "$HOME\.ssh\id_ed25519"`를 지정한다.
 암호화된 개인키는 Passphrase를 화면에 표시하지 않고 입력받는다.
 
+## 읽기 전용 마운트
+
+`-read-only`를 지정하면 파일과 폴더의 생성·쓰기·삭제·이름 변경·이동·수정
+시간 변경을 VFS 계층에서 차단하고 Windows에는 읽기 전용 속성으로 표시한다.
+
+```powershell
+.\bin\dkdrive-sftp-mount.exe `
+    -host example.com -port 22 -user tester -root /data `
+    -key "$HOME\.ssh\id_ed25519" -read-only -mount X:
+```
+
 ## 1차 점검 순서
 
 마운트 후 별도 PowerShell 창에서 다음과 같이 격리된 폴더를 사용한다.
