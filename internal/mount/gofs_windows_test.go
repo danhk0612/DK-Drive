@@ -8,8 +8,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/winfsp/go-winfsp/gofs"
 
 	localcache "github.com/danhk0612/DK-Drive/internal/cache"
 	"github.com/danhk0612/DK-Drive/internal/vfs"
@@ -32,6 +35,30 @@ func TestReadOnlyGoFileSystemRejectsWritableOpen(t *testing.T) {
 		if _, err := filesystem.OpenFile("file.txt", flag, 0o644); !errors.Is(err, fs.ErrPermission) {
 			t.Errorf("OpenFile(flag=%d) error = %v, want fs.ErrPermission", flag, err)
 		}
+	}
+}
+
+func TestNewMetadataBehaviourWrapsGoFS(t *testing.T) {
+	store, err := localcache.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("cache.New(): %v", err)
+	}
+	backend := &stagingBackend{}
+	base, err := gofs.NewOptions(NewGoFileSystem(backend, false, store))
+	if err != nil {
+		t.Fatalf("gofs.NewOptions(): %v", err)
+	}
+	if _, err := NewMetadataBehaviour(base, backend, false); err != nil {
+		t.Fatalf("NewMetadataBehaviour(): %v", err)
+	}
+}
+
+func TestFiletimeToTime(t *testing.T) {
+	want := time.Date(2026, time.January, 2, 3, 4, 6, 0, time.UTC)
+	filetime := syscall.NsecToFiletime(want.UnixNano())
+	value := uint64(filetime.HighDateTime)<<32 | uint64(filetime.LowDateTime)
+	if got := filetimeToTime(value); !got.Equal(want) {
+		t.Fatalf("filetimeToTime() = %v, want %v", got, want)
 	}
 }
 
@@ -118,6 +145,9 @@ func (backend *stagingBackend) Rename(context.Context, string, string) error {
 	return nil
 }
 func (backend *stagingBackend) SetModTime(context.Context, string, time.Time) error {
+	return nil
+}
+func (backend *stagingBackend) SetReadOnly(context.Context, string, bool) error {
 	return nil
 }
 func (backend *stagingBackend) Close() error {

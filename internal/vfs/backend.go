@@ -19,6 +19,7 @@ type Backend interface {
 	Remove(ctx context.Context, path string, directory bool) error
 	Rename(ctx context.Context, oldPath, newPath string) error
 	SetModTime(ctx context.Context, path string, modTime time.Time) error
+	SetReadOnly(ctx context.Context, path string, readOnly bool) error
 	Close() error
 }
 

@@ -296,6 +296,33 @@ func (backend *Backend) SetModTime(ctx context.Context, name string, modTime tim
 	return err
 }
 
+func (backend *Backend) SetReadOnly(ctx context.Context, name string, readOnly bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	remote, err := backend.remotePath(name)
+	if err != nil {
+		return err
+	}
+	_, err = withReconnect(ctx, backend, func(client *pkgsftp.Client) (struct{}, error) {
+		info, err := client.Stat(remote)
+		if err != nil {
+			return struct{}{}, err
+		}
+		mode := modeWithReadOnly(info.Mode(), readOnly)
+		return struct{}{}, client.Chmod(remote, mode)
+	})
+	return err
+}
+
+func modeWithReadOnly(mode os.FileMode, readOnly bool) os.FileMode {
+	mode = mode.Perm()
+	if readOnly {
+		return mode &^ 0o222
+	}
+	return mode | 0o200
+}
+
 func (backend *Backend) Close() error {
 	backend.mutex.Lock()
 	defer backend.mutex.Unlock()

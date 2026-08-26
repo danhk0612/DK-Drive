@@ -166,3 +166,12 @@ func TestIsConnectionError(t *testing.T) {
 		}
 	}
 }
+
+func TestModeWithReadOnly(t *testing.T) {
+	if got := modeWithReadOnly(0o664, true); got != 0o444 {
+		t.Fatalf("modeWithReadOnly(0664, true) = %#o, want 0444", got)
+	}
+	if got := modeWithReadOnly(0o444, false); got != 0o644 {
+		t.Fatalf("modeWithReadOnly(0444, false) = %#o, want 0644", got)
+	}
+}

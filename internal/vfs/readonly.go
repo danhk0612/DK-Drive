@@ -50,6 +50,10 @@ func (backend *readOnlyBackend) SetModTime(context.Context, string, time.Time) e
 	return ErrReadOnly
 }
 
+func (backend *readOnlyBackend) SetReadOnly(context.Context, string, bool) error {
+	return ErrReadOnly
+}
+
 func (backend *readOnlyBackend) Close() error {
 	return backend.backend.Close()
 }

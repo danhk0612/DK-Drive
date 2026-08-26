@@ -65,20 +65,24 @@ func main() {
 	defer backend.Close()
 
 	mountBackend := vfs.Backend(backend)
-	attributeMode := gofs.AttribReadOnlyBypass
+	attributeMode := gofs.AttribReadOnlyWindows
 	modeName := "읽기/쓰기 모드"
 	if *readOnly {
 		mountBackend = vfs.NewReadOnlyBackend(backend)
 		attributeMode = gofs.AttribReadOnlyAlways
 		modeName = "읽기 전용 모드"
 	}
-	behaviour, err := gofs.NewOptions(
+	baseBehaviour, err := gofs.NewOptions(
 		mount.NewGoFileSystem(mountBackend, *readOnly, cacheStore),
 		gofs.WithCaseInsensitive(false),
 		gofs.WithAttribReadOnlyTransMode(attributeMode),
 	)
 	if err != nil {
 		fatal("WinFsp 파일시스템 구성 실패: %v", err)
+	}
+	behaviour, err := mount.NewMetadataBehaviour(baseBehaviour, mountBackend, *readOnly)
+	if err != nil {
+		fatal("WinFsp 파일 속성 구성 실패: %v", err)
 	}
 	letter := strings.ToUpper(*mountpoint)
 	filesystem, err := winfsp.Mount(behaviour, letter)

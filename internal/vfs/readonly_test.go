@@ -24,6 +24,7 @@ func TestReadOnlyBackendRejectsMutations(t *testing.T) {
 		{name: "RemoveDirectory", run: func() error { return backend.Remove(ctx, "folder", true) }},
 		{name: "Rename", run: func() error { return backend.Rename(ctx, "old", "new") }},
 		{name: "SetModTime", run: func() error { return backend.SetModTime(ctx, "file.txt", time.Now()) }},
+		{name: "SetReadOnly", run: func() error { return backend.SetReadOnly(ctx, "file.txt", true) }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
