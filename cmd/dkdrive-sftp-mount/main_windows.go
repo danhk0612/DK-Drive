@@ -19,6 +19,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
 
+	localcache "github.com/danhk0612/DK-Drive/internal/cache"
 	"github.com/danhk0612/DK-Drive/internal/mount"
 	sftpbackend "github.com/danhk0612/DK-Drive/internal/protocol/sftp"
 	"github.com/danhk0612/DK-Drive/internal/vfs"
@@ -32,6 +33,7 @@ func main() {
 	mountpoint := flag.String("mount", "X:", "마운트할 드라이브 문자(예: X:)")
 	privateKey := flag.String("key", "", "OpenSSH 개인키 파일 경로")
 	readOnly := flag.Bool("read-only", false, "원격 드라이브의 변경 작업 차단")
+	cacheDirectory := flag.String("cache-dir", "", "로컬 캐시 폴더(기본값: %LOCALAPPDATA%\\DKDrive\\Cache)")
 	knownHosts := flag.String("known-hosts", defaultKnownHosts(), "known_hosts 파일")
 	flag.Parse()
 
@@ -40,6 +42,10 @@ func main() {
 	}
 	if *host == "" || *username == "" || *port == 0 || *port > 65535 {
 		fatal("-host, -user와 올바른 -port 값이 필요합니다")
+	}
+	cacheStore, err := localcache.New(*cacheDirectory)
+	if err != nil {
+		fatal("캐시 설정 실패: %v", err)
 	}
 	password, signer := authentication(*privateKey)
 
@@ -67,7 +73,7 @@ func main() {
 		modeName = "읽기 전용 모드"
 	}
 	behaviour, err := gofs.NewOptions(
-		mount.NewGoFileSystem(mountBackend, *readOnly),
+		mount.NewGoFileSystem(mountBackend, *readOnly, cacheStore),
 		gofs.WithCaseInsensitive(false),
 		gofs.WithAttribReadOnlyTransMode(attributeMode),
 	)
@@ -81,7 +87,7 @@ func main() {
 	}
 	defer filesystem.Unmount()
 
-	fmt.Printf("DKDrive SFTP 파일시스템을 %s에 %s로 마운트했습니다. 종료하려면 Ctrl+C를 누르세요.\n", letter, modeName)
+	fmt.Printf("DKDrive SFTP 파일시스템을 %s에 %s로 마운트했습니다. 캐시: %s. 종료하려면 Ctrl+C를 누르세요.\n", letter, modeName, cacheStore.Directory())
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 	<-interrupt

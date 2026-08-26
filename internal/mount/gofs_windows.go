@@ -15,6 +15,7 @@ import (
 
 	"github.com/winfsp/go-winfsp/gofs"
 
+	localcache "github.com/danhk0612/DK-Drive/internal/cache"
 	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
@@ -22,13 +23,14 @@ const operationTimeout = 30 * time.Second
 
 // NewGoFileSystem adapts the protocol-neutral backend to go-winfsp's gofs
 // boundary. Writable files are staged locally and uploaded on Sync or Close.
-func NewGoFileSystem(backend vfs.Backend, readOnly bool) gofs.FileSystem {
-	return &goFileSystem{backend: backend, readOnly: readOnly}
+func NewGoFileSystem(backend vfs.Backend, readOnly bool, cacheStore *localcache.Store) gofs.FileSystem {
+	return &goFileSystem{backend: backend, readOnly: readOnly, cacheStore: cacheStore}
 }
 
 type goFileSystem struct {
-	backend  vfs.Backend
-	readOnly bool
+	backend    vfs.Backend
+	readOnly   bool
+	cacheStore *localcache.Store
 }
 
 func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode) (gofs.File, error) {
@@ -54,7 +56,7 @@ func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode
 		return nil, os.ErrNotExist
 	}
 
-	temporary, err := os.CreateTemp("", "dkdrive-sftp-*")
+	temporary, err := filesystem.cacheStore.CreateStaging()
 	if err != nil {
 		return nil, err
 	}
