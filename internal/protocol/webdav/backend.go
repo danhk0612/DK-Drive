@@ -301,8 +301,8 @@ func unsupported(operation string) error {
 }
 
 func responseError(method string, response *http.Response) error {
-	message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-	detail := strings.TrimSpace(string(message))
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+	detail := strings.TrimSpace(string(body))
 	message := fmt.Sprintf("WebDAV %s 응답: %s", method, response.Status)
 	if detail != "" {
 		message += ": " + detail
