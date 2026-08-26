@@ -30,12 +30,11 @@ jobs:
             throw 'gofmt changes are required.'
           }
 
-      - name: Resolve dependencies
-        run: go mod tidy
-
-      - name: Print generated module sums
+      - name: Verify module files
         shell: pwsh
-        run: Get-Content go.sum
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
 
       - name: Test
         run: go test ./...
