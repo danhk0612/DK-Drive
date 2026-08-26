@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path"
+	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/term"
@@ -24,6 +26,7 @@ func main() {
 	root := flag.String("root", "/", "원격 시작 경로")
 	readPath := flag.String("read", "", "내용을 표준 출력할 원격 파일 경로")
 	writeTest := flag.Bool("write-test", false, "격리된 임시 폴더에서 쓰기 작업 검증")
+	showCapabilities := flag.Bool("capabilities", false, "서버가 광고하는 WebDAV 기능 조회")
 	flag.Parse()
 
 	if *host == "" || *username == "" || *port == 0 || *port > 65535 {
@@ -44,6 +47,20 @@ func main() {
 		fatal("연결 실패: %v", err)
 	}
 	defer backend.Close()
+	if *showCapabilities {
+		capabilities, err := backend.Capabilities(ctx)
+		if err != nil {
+			fatal("기능 조회 실패: %v", err)
+		}
+		fmt.Printf("DAV 클래스: %s\n", strings.Join(capabilities.DAVClasses, ", "))
+		methods := make([]string, 0, len(capabilities.Methods))
+		for method := range capabilities.Methods {
+			methods = append(methods, method)
+		}
+		slices.Sort(methods)
+		fmt.Printf("허용 메서드: %s\n", strings.Join(methods, ", "))
+		return
+	}
 	if *writeTest {
 		if err := runWriteTest(ctx, backend); err != nil {
 			fatal("쓰기 검증 실패: %v", err)

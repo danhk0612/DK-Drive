@@ -151,6 +151,39 @@ func TestResponseErrorMapsFileSystemErrors(t *testing.T) {
 	}
 }
 
+func TestCapabilities(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == "PROPFIND" {
+			writeMultistatus(writer, `<d:response><d:href>/dav/home/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`)
+			return
+		}
+		if request.Method != http.MethodOptions {
+			http.Error(writer, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		writer.Header().Add("DAV", "1, 2")
+		writer.Header().Add("Allow", "OPTIONS, PROPFIND, GET")
+		writer.Header().Add("Allow", "PUT, DELETE, MOVE")
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	backend := newTestBackend(t, server.URL, "tester", "secret")
+	defer backend.Close()
+	capabilities, err := backend.Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("Capabilities(): %v", err)
+	}
+	if len(capabilities.DAVClasses) != 2 || capabilities.DAVClasses[0] != "1" || capabilities.DAVClasses[1] != "2" {
+		t.Fatalf("DAV classes = %#v", capabilities.DAVClasses)
+	}
+	for _, method := range []string{"OPTIONS", "PROPFIND", "GET", "PUT", "DELETE", "MOVE"} {
+		if !capabilities.Methods[method] {
+			t.Errorf("method %s not reported", method)
+		}
+	}
+}
+
 func TestValidateConfig(t *testing.T) {
 	valid := Config{Scheme: "https", Host: "example.test", Port: 443, Username: "tester", Password: "secret"}
 	if err := validateConfig(valid); err != nil {

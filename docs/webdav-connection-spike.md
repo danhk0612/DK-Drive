@@ -48,6 +48,18 @@ $WebDAVRoot = '/home/'
     -read 'my.cnf'
 ```
 
+서버가 광고하는 DAV 클래스와 허용 메서드도 조회한다. 이 명령은 원격 파일을 변경하지 않는다.
+
+```powershell
+.\bin\dkdrive-webdav.exe `
+    -scheme https `
+    -host $WebDAVHost `
+    -port $WebDAVPort `
+    -user $WebDAVUser `
+    -root $WebDAVRoot `
+    -capabilities
+```
+
 마지막으로 격리된 임시 폴더에서 생성, 쓰기, 읽기, 이동, 이름 변경, 삭제를 검증한다.
 
 ```powershell

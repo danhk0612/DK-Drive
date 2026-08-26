@@ -51,6 +51,11 @@ type Backend struct {
 	timeout  time.Duration
 }
 
+type Capabilities struct {
+	DAVClasses []string
+	Methods    map[string]bool
+}
+
 func New(ctx context.Context, config Config) (*Backend, error) {
 	if err := validateConfig(config); err != nil {
 		return nil, err
@@ -139,6 +144,37 @@ func (backend *Backend) Stat(ctx context.Context, name string) (vfs.Entry, error
 		return vfs.Entry{}, fmt.Errorf("WebDAV PROPFIND가 항목 %d개를 반환했습니다", len(entries))
 	}
 	return entries[0], nil
+}
+
+func (backend *Backend) Capabilities(ctx context.Context) (Capabilities, error) {
+	request, err := backend.newRequest(ctx, http.MethodOptions, backend.baseURL, nil)
+	if err != nil {
+		return Capabilities{}, fmt.Errorf("WebDAV OPTIONS 요청 생성 실패: %w", err)
+	}
+	response, err := backend.client.Do(request)
+	if err != nil {
+		return Capabilities{}, fmt.Errorf("WebDAV OPTIONS 요청 실패: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return Capabilities{}, responseError("OPTIONS", response)
+	}
+	capabilities := Capabilities{Methods: make(map[string]bool)}
+	for _, value := range response.Header.Values("DAV") {
+		for _, item := range strings.Split(value, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				capabilities.DAVClasses = append(capabilities.DAVClasses, item)
+			}
+		}
+	}
+	for _, value := range response.Header.Values("Allow") {
+		for _, item := range strings.Split(value, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				capabilities.Methods[strings.ToUpper(item)] = true
+			}
+		}
+	}
+	return capabilities, nil
 }
 
 func (backend *Backend) ReadDir(ctx context.Context, name string) ([]vfs.Entry, error) {
