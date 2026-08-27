@@ -2,6 +2,7 @@ package webdav
 
 import (
 	"bytes"
+	"crypto/tls"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -47,7 +48,8 @@ type Config struct {
 	Password   string
 	Root       string
 	Timeout    time.Duration
-	HTTPClient *http.Client
+	HTTPClient             *http.Client
+	InsecureSkipTLSVerify bool
 }
 
 type Backend struct {
@@ -73,6 +75,11 @@ func New(ctx context.Context, config Config) (*Backend, error) {
 	client := config.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: config.Timeout}
+		if config.InsecureSkipTLSVerify {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+			client.Transport = transport
+		}
 	}
 	baseURL := &url.URL{
 		Scheme: strings.ToLower(config.Scheme),
