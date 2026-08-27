@@ -2,8 +2,8 @@ package webdav
 
 import (
 	"bytes"
-	"crypto/tls"
 	"context"
+	"crypto/tls"
 	"encoding/xml"
 	"errors"
 	"fmt"
