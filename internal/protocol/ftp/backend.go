@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"math"
 	"net"
+	"net/textproto"
 	"os"
 	"path"
 	"strings"
@@ -42,11 +43,13 @@ type Config struct {
 }
 
 type Backend struct {
-	mutex   sync.Mutex
-	client  *ftpclient.ServerConn
-	root    string
-	timeout time.Duration
-	closed  bool
+	mutex      sync.Mutex
+	client     *ftpclient.ServerConn
+	config     Config
+	root       string
+	timeout    time.Duration
+	needsProbe bool
+	closed     bool
 }
 
 func New(ctx context.Context, config Config) (*Backend, error) {
@@ -56,12 +59,15 @@ func New(ctx context.Context, config Config) (*Backend, error) {
 	if config.Timeout <= 0 {
 		config.Timeout = defaultTimeout
 	}
+	if config.TLSConfig != nil {
+		config.TLSConfig = config.TLSConfig.Clone()
+	}
 
 	client, root, err := connect(ctx, config)
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{client: client, root: root, timeout: config.Timeout}, nil
+	return &Backend{client: client, config: config, root: root, timeout: config.Timeout}, nil
 }
 
 func connect(ctx context.Context, config Config) (*ftpclient.ServerConn, string, error) {
@@ -158,10 +164,29 @@ func (backend *Backend) Stat(ctx context.Context, name string) (vfs.Entry, error
 		return vfs.Entry{Name: path.Base(backend.root), Mode: fs.ModeDir | 0o755}, nil
 	}
 	entry, statErr := client.GetEntry(remote)
+	if statErr != nil && isConnectionError(statErr) {
+		if reconnectErr := backend.reconnectLocked(ctx); reconnectErr != nil {
+			return vfs.Entry{}, reconnectErr
+		}
+		client = backend.client
+		entry, statErr = client.GetEntry(remote)
+	}
 	if statErr == nil {
 		return entryFromFTP(entry), nil
 	}
+	if isConnectionError(statErr) {
+		backend.needsProbe = true
+		return vfs.Entry{}, fmt.Errorf("FTP 경로 조회 실패: %w", statErr)
+	}
 	entries, listErr := client.List(path.Dir(remote))
+	backend.needsProbe = true
+	if listErr != nil && isConnectionError(listErr) {
+		if reconnectErr := backend.reconnectLocked(ctx); reconnectErr != nil {
+			return vfs.Entry{}, reconnectErr
+		}
+		entries, listErr = backend.client.List(path.Dir(remote))
+		backend.needsProbe = true
+	}
 	if listErr != nil {
 		return vfs.Entry{}, fmt.Errorf("FTP 경로 조회 실패: %w", errors.Join(statErr, listErr))
 	}
@@ -185,6 +210,14 @@ func (backend *Backend) ReadDir(ctx context.Context, name string) ([]vfs.Entry, 
 	defer backend.mutex.Unlock()
 
 	items, err := client.List(remote)
+	backend.needsProbe = true
+	if err != nil && isConnectionError(err) {
+		if reconnectErr := backend.reconnectLocked(ctx); reconnectErr != nil {
+			return nil, reconnectErr
+		}
+		items, err = backend.client.List(remote)
+		backend.needsProbe = true
+	}
 	if err != nil {
 		return nil, fmt.Errorf("FTP 디렉터리 조회 실패: %w", err)
 	}
@@ -221,23 +254,37 @@ func (backend *Backend) OpenRead(ctx context.Context, name string) (io.ReadClose
 		return nil, err
 	}
 	response, err := client.Retr(remote)
+	if err != nil && isConnectionError(err) {
+		if reconnectErr := backend.reconnectLocked(ctx); reconnectErr != nil {
+			backend.mutex.Unlock()
+			return nil, reconnectErr
+		}
+		response, err = backend.client.Retr(remote)
+	}
 	if err != nil {
+		backend.needsProbe = isConnectionError(err)
 		backend.mutex.Unlock()
 		return nil, fmt.Errorf("FTP 파일 읽기 시작 실패: %w", err)
 	}
-	return &lockedReadCloser{ReadCloser: response, unlock: backend.mutex.Unlock}, nil
+	return &lockedReadCloser{ReadCloser: response, finish: func() {
+		backend.needsProbe = true
+		backend.mutex.Unlock()
+	}}, nil
 }
 
 type lockedReadCloser struct {
 	io.ReadCloser
 	once   sync.Once
-	unlock func()
+	finish func()
+	err    error
 }
 
 func (reader *lockedReadCloser) Close() error {
-	err := reader.ReadCloser.Close()
-	reader.once.Do(reader.unlock)
-	return err
+	reader.once.Do(func() {
+		reader.err = reader.ReadCloser.Close()
+		reader.finish()
+	})
+	return reader.err
 }
 
 func (backend *Backend) OpenWrite(ctx context.Context, name string, options vfs.WriteOptions) (vfs.WriteHandle, error) {
@@ -352,11 +399,48 @@ func (backend *Backend) lock(ctx context.Context) (*ftpclient.ServerConn, error)
 		return nil, err
 	}
 	backend.mutex.Lock()
+	if err := ctx.Err(); err != nil {
+		backend.mutex.Unlock()
+		return nil, err
+	}
 	if backend.closed {
 		backend.mutex.Unlock()
 		return nil, net.ErrClosed
 	}
+	if backend.needsProbe {
+		if err := backend.client.NoOp(); err != nil {
+			if !isConnectionError(err) {
+				backend.mutex.Unlock()
+				return nil, fmt.Errorf("FTP 연결 상태 확인 실패: %w", err)
+			}
+			if err := backend.reconnectLocked(ctx); err != nil {
+				backend.mutex.Unlock()
+				return nil, err
+			}
+		}
+		backend.needsProbe = false
+	}
 	return backend.client, nil
+}
+
+func (backend *Backend) reconnectLocked(ctx context.Context) error {
+	backend.needsProbe = true
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	client, root, err := connect(ctx, backend.config)
+	if err != nil {
+		return fmt.Errorf("FTP 재연결 실패: %w", err)
+	}
+	if root != backend.root {
+		client.Quit()
+		return errors.New("FTP 재연결 후 원격 시작 경로가 변경되었습니다")
+	}
+	oldClient := backend.client
+	backend.client = client
+	backend.needsProbe = false
+	oldClient.Quit()
+	return nil
 }
 
 func (backend *Backend) withClient(ctx context.Context, operation string, action func(*ftpclient.ServerConn) error) error {
@@ -366,6 +450,11 @@ func (backend *Backend) withClient(ctx context.Context, operation string, action
 	}
 	defer backend.mutex.Unlock()
 	if err := action(client); err != nil {
+		if isConnectionError(err) {
+			backend.needsProbe = true
+		}
+		// The server may have applied the mutation before its reply was lost.
+		// Recover for the next operation; never replay this operation implicitly.
 		return fmt.Errorf("FTP %s 실패: %w", operation, err)
 	}
 	return nil
@@ -429,12 +518,43 @@ func (handle *uploadHandle) syncLocked() error {
 		return err
 	}
 	err = client.Stor(handle.remote, io.NewSectionReader(handle.file, 0, info.Size()))
+	handle.backend.needsProbe = true
 	handle.backend.mutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("FTP 파일 업로드 실패: %w", err)
 	}
 	handle.dirty = false
 	return nil
+}
+
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var reply *textproto.Error
+	if errors.As(err, &reply) {
+		return reply.Code == 421 // Service not available, closing control connection.
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"broken pipe",
+		"connection aborted",
+		"connection reset",
+		"forcibly closed",
+		"use of closed network connection",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (handle *uploadHandle) Close() error {
