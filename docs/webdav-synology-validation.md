@@ -139,6 +139,13 @@ $WebDAVSkipTLSVerify = $true
 - [x] WinFsp WebDAV 드라이브를 `X:`에 읽기/쓰기 모드로 마운트
 - [x] 기본 캐시 경로 초기화
 - [ ] Windows 파일 작업
+  - [x] 목록과 기존 파일 읽기
+  - [x] 폴더 및 파일 생성
+  - [x] 파일 쓰기와 즉시 읽기
+  - [x] 같은 폴더 내 이름 변경
+  - [ ] 다른 폴더로 이동과 삭제
+
+이름 변경 최초 검증에서는 WebDAV의 래핑된 `fs.ErrNotExist`를 go-winfsp의 `os.IsNotExist`가 인식하지 못해 실제 `MOVE` 전에 중단됐다. 마운트 경계에서 파일 없음 오류를 표준 `os.ErrNotExist`로 변환한 뒤 재검증하여 통과했다.
 
 별도 PowerShell 창에서 마운트를 실행하고 비밀번호를 입력한다.
 
