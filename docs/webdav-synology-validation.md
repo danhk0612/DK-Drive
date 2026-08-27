@@ -134,6 +134,12 @@ $WebDAVSkipTLSVerify = $true
 
 ## 7. 읽기/쓰기 마운트
 
+2026-08-27 Windows 실환경 검증 상태:
+
+- [x] WinFsp WebDAV 드라이브를 `X:`에 읽기/쓰기 모드로 마운트
+- [x] 기본 캐시 경로 초기화
+- [ ] Windows 파일 작업
+
 별도 PowerShell 창에서 마운트를 실행하고 비밀번호를 입력한다.
 
 ```powershell
