@@ -24,6 +24,7 @@ func main() {
 	port := flag.Uint("port", 443, "WebDAV 포트")
 	username := flag.String("user", "", "WebDAV 사용자명")
 	root := flag.String("root", "/", "원격 시작 경로")
+	insecureSkipTLSVerify := flag.Bool("insecure-skip-tls-verify", false, "HTTPS 인증서 검증 건너뛰기(신뢰할 수 있는 내부망 테스트 전용)")
 	readPath := flag.String("read", "", "내용을 표준 출력할 원격 파일 경로")
 	writeTest := flag.Bool("write-test", false, "격리된 임시 폴더에서 쓰기 작업 검증")
 	showCapabilities := flag.Bool("capabilities", false, "서버가 광고하는 WebDAV 기능 조회")
@@ -43,6 +44,7 @@ func main() {
 	backend, err := webdavbackend.New(ctx, webdavbackend.Config{
 		Scheme: *scheme, Host: *host, Port: uint16(*port), Username: *username,
 		Password: password, Root: *root, Timeout: 10 * time.Second,
+		InsecureSkipTLSVerify: *insecureSkipTLSVerify,
 	})
 	if err != nil {
 		fatal("연결 실패: %v", err)
