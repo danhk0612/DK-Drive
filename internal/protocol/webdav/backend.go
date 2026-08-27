@@ -41,14 +41,14 @@ const lockBody = `<?xml version="1.0" encoding="utf-8"?>
 </d:lockinfo>`
 
 type Config struct {
-	Scheme     string
-	Host       string
-	Port       uint16
-	Username   string
-	Password   string
-	Root       string
-	Timeout    time.Duration
-	HTTPClient             *http.Client
+	Scheme                string
+	Host                  string
+	Port                  uint16
+	Username              string
+	Password              string
+	Root                  string
+	Timeout               time.Duration
+	HTTPClient            *http.Client
 	InsecureSkipTLSVerify bool
 }
 
