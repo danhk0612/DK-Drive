@@ -89,6 +89,14 @@ $WebDAVSkipTLSVerify = $true
 
 ## 5. 기본 쓰기
 
+2026-08-27 Synology 실서버 검증 완료:
+
+- [x] 격리된 임시 폴더 생성
+- [x] 한글·공백 경로의 파일 PUT
+- [x] 작성 후 GET 내용 일치
+- [x] 파일 이동과 이름 변경
+- [x] 파일과 하위·상위 폴더 삭제
+
 격리된 임시 폴더를 만들고 `MKCOL`, `PUT`, `GET`, `MOVE`, `DELETE`를 순서대로 검증한 뒤 삭제한다.
 
 ```powershell
