@@ -112,6 +112,13 @@ $WebDAVSkipTLSVerify = $true
 
 ## 6. LOCK과 UNLOCK
 
+2026-08-27 Synology 실서버 검증 완료:
+
+- [x] DAV 클래스 2 및 `LOCK`/`UNLOCK` 광고 확인
+- [x] 임시 파일 LOCK과 잠금 토큰 수신
+- [x] 잠금 토큰을 사용한 UNLOCK
+- [x] 잠금 해제 후 임시 파일 삭제
+
 4단계 결과에 DAV 클래스 `2`와 `LOCK`, `UNLOCK`이 포함된 경우에만 실행한다.
 
 ```powershell
