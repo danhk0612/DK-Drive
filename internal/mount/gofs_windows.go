@@ -116,6 +116,9 @@ func (filesystem *goFileSystem) Mkdir(name string, _ os.FileMode) error {
 func (filesystem *goFileSystem) Stat(name string) (os.FileInfo, error) {
 	entry, err := filesystem.stat(cleanMountPath(name))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, os.ErrNotExist
+		}
 		return nil, err
 	}
 	return entryInfo{entry: entry}, nil
