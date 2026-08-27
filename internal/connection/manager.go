@@ -70,27 +70,48 @@ func (m *Manager) Connect(ctx context.Context, id string, p config.Profile, secr
 }
 
 func (m *Manager) Disconnect(id string) error {
+	_, err := m.disconnect(id, false)
+	return err
+}
+
+// ForceDisconnect must be invoked only after the caller has obtained consent.
+// The message contains cache preservation details even on successful detach.
+func (m *Manager) ForceDisconnect(id string) (string, error) {
+	return m.disconnect(id, true)
+}
+
+func (m *Manager) disconnect(id string, force bool) (string, error) {
 	m.mu.Lock()
 	e := m.entries[id]
 	if e == nil {
 		m.mu.Unlock()
-		return nil
+		return "", nil
 	}
 	if e.state != "연결됨" {
 		m.mu.Unlock()
-		return errors.New("연결 작업이 끝난 뒤 다시 시도하세요")
+		return "", errors.New("연결 작업이 끝난 뒤 다시 시도하세요")
 	}
 	e.state = "해제 중"
 	m.mu.Unlock()
-	err := e.session.Close()
+	var message string
+	var err error
+	if force {
+		if s, ok := e.session.(interface{ ForceClose() (string, error) }); ok {
+			message, err = s.ForceClose()
+		} else {
+			err = errors.New("이 연결은 강제 해제를 지원하지 않습니다")
+		}
+	} else {
+		err = e.session.Close()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err != nil {
 		e.state = "연결됨"
-		return err
+		return message, err
 	}
 	delete(m.entries, id)
-	return nil
+	return message, nil
 }
 
 // CloseAll deliberately leaves sessions that refuse a safe close mounted.

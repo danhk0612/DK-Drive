@@ -74,6 +74,9 @@ func TestManagerReservesDriveWhileConnecting(t *testing.T) {
 	if err := m.Disconnect("first"); err == nil {
 		t.Fatal("disconnect during connect accepted")
 	}
+	if _, err := m.ForceDisconnect("first"); err == nil {
+		t.Fatal("force disconnect during connect accepted")
+	}
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -100,5 +103,22 @@ func TestManagerConnectFailureAllowsRetry(t *testing.T) {
 	}
 	if err := m.Connect(context.Background(), "id", profile("X"), config.Secrets{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagerForceUnsupportedKeepsReservation(t *testing.T) {
+	s := &fakeSession{}
+	m := New(func(context.Context, config.Profile, config.Secrets) (Session, error) { return s, nil })
+	if err := m.Connect(context.Background(), "id", profile("X"), config.Secrets{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ForceDisconnect("id"); err == nil {
+		t.Fatal("unsupported force succeeded")
+	}
+	if m.State("id") != "연결됨" || s.closed.Load() != 0 {
+		t.Fatal("unexpected fallback/removed session")
+	}
+	if err := m.Connect(context.Background(), "other", profile("X"), config.Secrets{}); err == nil {
+		t.Fatal("lost drive reservation")
 	}
 }

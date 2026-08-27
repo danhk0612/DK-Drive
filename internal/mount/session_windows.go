@@ -75,6 +75,25 @@ func (s *Session) Close() error {
 	return nil
 }
 
+// ForceClose is only called after explicit user confirmation. It does not kill
+// the process or retry remote writes. Local staging survives forced detach.
+func (s *Session) ForceClose() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fs == nil {
+		return "", nil
+	}
+	warning := s.guard.forceStop()
+	s.fs.Unmount()
+	s.fs = nil
+	_ = s.backend.Close()
+	message := "강제 해제 완료. 보존된 임시 파일 확인 위치: " + s.guard.cache
+	if warning != nil {
+		message += "\n파일 처리 경고 (데이터 보존을 확인하세요): " + warning.Error()
+	}
+	return message, nil
+}
+
 type guardedFS struct {
 	gofs.FileSystem
 	mu       sync.Mutex
@@ -82,6 +101,30 @@ type guardedFS struct {
 	stopping bool
 	closeErr error
 	cache    string
+	files    map[*trackedFile]struct{}
+}
+
+func (g *guardedFS) forceStop() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.stopping = true
+	var result error
+	for f := range g.files {
+		var err error
+		if staged, ok := f.File.(*stagedFile); ok {
+			err = staged.closePreserving()
+			if err != nil {
+				err = fmt.Errorf("임시 파일 %s: %w", staged.temporaryPath, err)
+			}
+		} else {
+			err = f.File.Close()
+		}
+		f.closed = true
+		g.open--
+		delete(g.files, f)
+		result = errors.Join(result, err)
+	}
+	return errors.Join(g.closeErr, result)
 }
 
 func (g *guardedFS) prepareStop() error {
@@ -108,7 +151,12 @@ func (g *guardedFS) OpenFile(n string, f int, m os.FileMode) (gofs.File, error) 
 		return nil, err
 	}
 	g.open++
-	return &trackedFile{File: file, owner: g}, nil
+	tracked := &trackedFile{File: file, owner: g}
+	if g.files == nil {
+		g.files = make(map[*trackedFile]struct{})
+	}
+	g.files[tracked] = struct{}{}
+	return tracked, nil
 }
 func (g *guardedFS) Stat(n string) (os.FileInfo, error) {
 	g.mu.Lock()
@@ -158,6 +206,12 @@ func (f *trackedFile) Close() error {
 	err := f.File.Close()
 	f.closed = true
 	f.owner.open--
+	delete(f.owner.files, f)
+	if err != nil {
+		if staged, ok := f.File.(*stagedFile); ok {
+			err = fmt.Errorf("임시 파일 %s: %w", staged.temporaryPath, err)
+		}
+	}
 	f.owner.closeErr = errors.Join(f.owner.closeErr, err)
 	return err
 }

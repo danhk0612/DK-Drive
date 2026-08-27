@@ -358,6 +358,22 @@ func (file *stagedFile) Close() error {
 	return errors.Join(syncErr, closeErr)
 }
 
+// closePreserving seals a GUI handle without publishing or deleting staging.
+// Even clean staging is retained: a previous upload may have had an uncertain
+// outcome. Application/Windows buffers not yet delivered here cannot be saved.
+func (file *stagedFile) closePreserving() error {
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	if file.closed {
+		return nil
+	}
+	syncErr := file.File.Sync()
+	file.closed = true
+	closeErr := file.File.Close()
+	file.filesystem.openFiles.Delete(file)
+	return errors.Join(syncErr, closeErr)
+}
+
 func (file *stagedFile) setModTime(modTime time.Time) error {
 	file.mutex.Lock()
 	defer file.mutex.Unlock()

@@ -41,8 +41,10 @@ var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (�
 var active *window
 
 type taskResult struct {
-	err  error
-	done func(error)
+	err     error
+	done    func(error)
+	confirm func() bool
+	answer  chan bool
 }
 type window struct {
 	hwnd, font, icon                                                                             uintptr
@@ -187,6 +189,10 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 		case wmTaskDone:
 			select {
 			case r := <-w.results:
+				if r.confirm != nil {
+					r.answer <- r.confirm()
+					return 0
+				}
 				w.setBusy(false)
 				w.refreshList()
 				r.done(r.err)
@@ -284,7 +290,7 @@ func (w *window) build() error {
 	w.remember = checkbox("비밀번호·Passphrase 저장 (현재 Windows 사용자용 암호화)", 290, 416, 620, 0)
 	w.insecure = checkbox("TLS 인증서 검증 건너뛰기 (신뢰할 수 있는 테스트 서버 전용)", 290, 446, 620, 0)
 	label("SFTP 개인키·known_hosts: 전체 경로 입력 (선택)", 290, 481, 620)
-	label("FTP/HTTP는 평문 전송. 파일 사용 중에는 해제할 수 없습니다.", 290, 505, 620)
+	label("FTP/HTTP는 평문 전송. 강제 해제 시 미저장 데이터가 손실될 수 있습니다.", 290, 505, 620)
 	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 520, 220, idCloseToTray)
 	w.startup = checkbox("Windows 로그인 시 실행", 16, 547, 240, idStartup)
 	button("프로그램 종료", 16, 580, 250, idExit)
@@ -599,12 +605,42 @@ func (w *window) exit() {
 	if w.busy {
 		return
 	}
-	w.task(w.manager.CloseAll, func(err error) {
-		if err != nil {
-			w.report(err)
-			return
+	w.disconnect(w.settings.Profiles, true)
+}
+
+func (w *window) disconnect(profiles []config.SavedProfile, exiting bool) {
+	profiles = append([]config.SavedProfile(nil), profiles...)
+	var message string
+	w.task(func() error {
+		var err error
+		message, err = disconnectProfiles(w.manager, profiles, func(p config.SavedProfile, failure error) bool {
+			answer := make(chan bool, 1)
+			w.results <- taskResult{answer: answer, confirm: func() bool {
+				w.show()
+				// MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2: No is default.
+				return box(w.hwnd, forceDisconnectPrompt(p, failure), 0x134) == 6
+			}}
+			call("PostMessageW", w.hwnd, wmTaskDone, 0, 0)
+			return <-answer
+		})
+		return err
+	}, func(err error) {
+		// Completion dialogs run a nested Windows message loop too. Keep tray
+		// commands blocked until the result is acknowledged (especially on exit).
+		w.setBusy(true)
+		defer w.setBusy(false)
+		w.report(err)
+		if message != "" {
+			w.show()
+			if err != nil {
+				message += "\n\n" + err.Error()
+			}
+			setText(w.status, message)
+			alert(w.hwnd, message)
 		}
-		call("DestroyWindow", w.hwnd)
+		if exiting && err == nil {
+			call("DestroyWindow", w.hwnd)
+		}
 	})
 }
 
@@ -622,7 +658,7 @@ func (w *window) command(id, notice int) {
 		if w.manager.State(p.ID) == "연결 안 됨" {
 			w.connect(i)
 		} else {
-			w.task(func() error { return w.manager.Disconnect(p.ID) }, w.report)
+			w.disconnect([]config.SavedProfile{p}, false)
 		}
 		return
 	}
@@ -665,13 +701,12 @@ func (w *window) command(id, notice int) {
 		w.connect(w.selected)
 	case idDisconnect:
 		if w.selected >= 0 {
-			id := w.settings.Profiles[w.selected].ID
-			w.task(func() error { return w.manager.Disconnect(id) }, w.report)
+			w.disconnect([]config.SavedProfile{w.settings.Profiles[w.selected]}, false)
 		}
 	case idConnectAll:
 		w.connectAll(false)
 	case idDisconnectAll:
-		w.task(w.manager.CloseAll, w.report)
+		w.disconnect(w.settings.Profiles, false)
 	case idExit:
 		w.exit()
 	case idProtocol:
