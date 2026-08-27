@@ -15,8 +15,8 @@ Windows 드라이브 문자로 마운트하는 경량 네트워크 드라이브 
 검증했습니다.
 
 0.4 FTP/FTPS 백엔드는 FTP, Explicit FTPS, Implicit FTPS의 비밀번호 인증,
-원격 시작 경로, 목록과 읽기를 모의 서버 자동 테스트로 검증했습니다. 실제
-서버 검증 후 쓰기와 WinFsp 마운트를 추가합니다.
+원격 시작 경로, 목록, 읽기, 쓰기와 파일 작업을 모의 서버 자동 테스트로
+검증했습니다. WinFsp 마운트도 구현했으며 실제 서버와 Windows 검증 전입니다.
 
 ## 목표 기능
 
@@ -80,8 +80,8 @@ FTP와 FTPS 연결 및 읽기 검증 방법은
 - SFTP에는 별도 생성·접근 시간이 없어 Windows의 생성·접근 시간에 수정 시간을 표시
 - Hidden, System, Archive 등 SFTP에 대응값이 없는 Windows 속성 변경 미지원
 - WebDAV 수정 시간과 파일별 ReadOnly 속성 변경 미지원
-- FTP/FTPS 백엔드는 목록과 읽기 자동 테스트만 완료했으며 실제 서버 검증 전
-- FTP/FTPS 쓰기, 자동 재연결과 WinFsp 마운트 미구현
+- FTP/FTPS 백엔드와 WinFsp 마운트는 자동 테스트만 완료했으며 실제 서버 검증 전
+- FTP/FTPS 자동 재연결 미구현
 - GUI와 트레이 미구현
 - 보안 자격 증명 저장 미구현
 

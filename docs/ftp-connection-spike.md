@@ -1,8 +1,8 @@
 # FTP/FTPS 연결 기술 검증
 
-0.4 첫 단계는 FTP, Explicit FTPS와 Implicit FTPS의 비밀번호 인증, 원격 시작
-경로, 디렉터리 목록과 파일 읽기를 검증한다. 쓰기와 WinFsp 마운트는 실서버에서
-이 범위가 통과한 뒤 추가한다.
+0.4는 FTP, Explicit FTPS와 Implicit FTPS의 비밀번호 인증, 원격 시작 경로,
+파일 작업과 WinFsp 마운트를 검증한다. 자동 테스트를 통과한 기능도 실제 서버와
+Windows에서 확인하기 전에는 로드맵을 완료 처리하지 않는다.
 
 ## 자동 테스트 범위
 
@@ -12,6 +12,10 @@
 - `CWD`와 `PWD`를 사용한 원격 시작 경로 확인
 - UTF-8 파일명, `MLSD` 목록과 `MLST` 속성
 - 수동형 데이터 연결의 `RETR` 파일 읽기
+- 로컬 임시 파일을 사용한 임의 위치 쓰기와 `STOR` 전체 파일 반영
+- `MKD`, `RNFR`/`RNTO`, `DELE`, `RMD` 파일 작업
+- 서버가 광고하는 경우 `MFMT` 수정 시간 설정
+- 연결 전체 읽기 전용과 WinFsp 마운트 Windows 빌드
 
 `github.com/jlaffaye/ftp`는 연결 하나에서 동시에 여러 명령을 처리할 수 없으므로
 백엔드는 목록, 속성 조회와 파일 전송을 직렬화한다.
@@ -22,6 +26,7 @@
 go test ./...
 go vet ./...
 go build -o bin/dkdrive-ftp.exe ./cmd/dkdrive-ftp
+go build -o bin/dkdrive-ftp-mount.exe ./cmd/dkdrive-ftp-mount
 ```
 
 ## FTP
@@ -93,10 +98,44 @@ FTP는 인증 정보와 파일 내용이 암호화되지 않는다. 신뢰할 �
 `DKDRIVE_FTP_PASSWORD` 환경 변수를 사용할 수 있지만 실제 비밀번호를 저장소나
 일반 설정 파일에 기록하지 않는다.
 
+## 기본 쓰기
+
+연결과 읽기가 통과한 동일한 모드에서 격리된 임시 경로의 생성, 쓰기, 읽기,
+이동, 이름 변경과 삭제를 순서대로 검증한다.
+
+```powershell
+.\bin\dkdrive-ftp.exe `
+    -mode explicit-ftps `
+    -host $FTPHost `
+    -port $FTPPort `
+    -user $FTPUser `
+    -root $FTPRoot `
+    -write-test
+```
+
+## WinFsp 마운트
+
+실서버 기본 쓰기까지 통과한 모드로 마운트한다.
+
+```powershell
+.\bin\dkdrive-ftp-mount.exe `
+    -mode explicit-ftps `
+    -host $FTPHost `
+    -port $FTPPort `
+    -user $FTPUser `
+    -root $FTPRoot `
+    -mount 'X:'
+```
+
+읽기 전용 검증에는 같은 명령 끝에 `-read-only`를 추가한다. 인증서 검증을
+우회해야 하는 신뢰할 수 있는 내부 테스트 서버인 경우에만
+`-insecure-skip-tls-verify`를 추가한다.
+
 ## 현재 범위
 
-- 목록과 읽기만 구현
-- 파일 생성, 쓰기, 이동, 이름 변경과 삭제 미구현
-- 수정 시간 및 Windows 속성 변경 미구현
-- 자동 재연결과 WinFsp 마운트 미구현
-- 서버별 `MLSD`, `MLST`, UTF-8 및 수동형 연결 차이 실서버 검증 전
+- 연결, 목록, 읽기, 쓰기, 파일 작업과 WinFsp 마운트 코드 구현 완료
+- FTP/FTPS 실제 서버 및 Windows 탐색기 검증 전
+- 수정 시간은 서버가 `MFMT` 또는 쓰기 가능한 `MDTM`을 광고할 때만 지원
+- 파일별 Windows ReadOnly 속성 변경 미지원
+- 자동 재연결 미구현
+- 서버별 `MLSD`, `MLST`, UTF-8 및 수동형 연결 차이 검증 전
