@@ -37,8 +37,8 @@
 - [x] 연결별 읽기 전용
 - [x] WebDAV 백엔드를 WinFsp 드라이브로 마운트
 - [x] 서버별 속성 및 LOCK/UNLOCK 지원 범위 확인
-- [ ] Windows 탐색기 실제 사용 점검
+- [x] Windows 탐색기 실제 사용 점검
 
-연결, 목록, 읽기, 쓰기, 폴더 작업, OPTIONS 기능 조회, LOCK/UNLOCK과 WinFsp 마운트 코드를 구현하고 모의 서버 자동 테스트를 추가했다. 체크박스 완료 처리는 Synology 및 Windows 실제 환경 검증 후 진행한다.
+0.3 WebDAV 기본 범위는 Synology NAS와 Windows 10/11 실제 환경 검증까지 완료했다.
 
 0.4 이후의 상세 범위는 프로젝트 Work 지침서의 단계 구분을 따른다.
