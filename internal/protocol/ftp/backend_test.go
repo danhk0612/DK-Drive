@@ -13,8 +13,11 @@ import (
 	"math/big"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
 func TestValidateConfig(t *testing.T) {
@@ -115,6 +118,35 @@ func TestBackendListsAndReadsOverFTPAndFTPS(t *testing.T) {
 			if string(content) != "DKDrive FTP test" {
 				t.Fatalf("content = %q", content)
 			}
+
+			if err := backend.Mkdir(context.Background(), "새 폴더"); err != nil {
+				t.Fatalf("Mkdir(): %v", err)
+			}
+			handle, err := backend.OpenWrite(context.Background(), "새 폴더/작성.txt", vfs.WriteOptions{Create: true, Truncate: true})
+			if err != nil {
+				t.Fatalf("OpenWrite(): %v", err)
+			}
+			if _, err := handle.WriteAt([]byte("FTP upload test"), 0); err != nil {
+				t.Fatalf("WriteAt(): %v", err)
+			}
+			if err := handle.Close(); err != nil {
+				t.Fatalf("write Close(): %v", err)
+			}
+			if got := server.Uploaded(); got != "FTP upload test" {
+				t.Fatalf("uploaded = %q", got)
+			}
+			if err := backend.Rename(context.Background(), "새 폴더/작성.txt", "이동.txt"); err != nil {
+				t.Fatalf("Rename(): %v", err)
+			}
+			if err := backend.SetModTime(context.Background(), "이동.txt", time.Now()); err != nil {
+				t.Fatalf("SetModTime(): %v", err)
+			}
+			if err := backend.Remove(context.Background(), "이동.txt", false); err != nil {
+				t.Fatalf("Remove(file): %v", err)
+			}
+			if err := backend.Remove(context.Background(), "새 폴더", true); err != nil {
+				t.Fatalf("Remove(directory): %v", err)
+			}
 			if err := backend.Close(); err != nil {
 				t.Fatalf("Close(): %v", err)
 			}
@@ -128,6 +160,8 @@ type testServer struct {
 	mode        TLSMode
 	certificate tls.Certificate
 	done        chan struct{}
+	mutex       sync.Mutex
+	uploaded    string
 }
 
 func newTestServer(t *testing.T, mode TLSMode, certificate tls.Certificate) *testServer {
@@ -152,6 +186,12 @@ func (server *testServer) Close() {
 	case <-time.After(5 * time.Second):
 		server.t.Fatal("FTP test server did not stop")
 	}
+}
+
+func (server *testServer) Uploaded() string {
+	server.mutex.Lock()
+	defer server.mutex.Unlock()
+	return server.uploaded
 }
 
 func (server *testServer) serve() {
@@ -191,7 +231,7 @@ func (server *testServer) handle(connection net.Conn) {
 		case "PASS":
 			writeReply(writer, "230 Logged in")
 		case "FEAT":
-			writeReply(writer, "211-Features\r\n MLST type*;size*;modify*;\r\n MLSD\r\n UTF8\r\n MDTM\r\n211 End")
+			writeReply(writer, "211-Features\r\n MLST type*;size*;modify*;\r\n MLSD\r\n UTF8\r\n MDTM\r\n MFMT\r\n211 End")
 		case "TYPE", "OPTS", "PBSZ", "PROT":
 			writeReply(writer, "200 Command okay")
 		case "CWD":
@@ -215,6 +255,19 @@ func (server *testServer) handle(connection net.Conn) {
 			server.writeData(dataListener, "DKDrive FTP test")
 			writeReply(writer, "226 Transfer complete")
 			dataListener = nil
+		case "STOR":
+			writeReply(writer, "150 Opening data connection")
+			server.readData(dataListener)
+			writeReply(writer, "226 Transfer complete")
+			dataListener = nil
+		case "MKD":
+			writeReply(writer, `257 "directory" created`)
+		case "RNFR":
+			writeReply(writer, "350 File action pending")
+		case "RNTO", "DELE", "RMD":
+			writeReply(writer, "250 File action okay")
+		case "MFMT":
+			writeReply(writer, "213 Modify time set")
 		case "QUIT":
 			writeReply(writer, "221 Goodbye")
 			return
@@ -250,6 +303,31 @@ func (server *testServer) writeData(listener net.Listener, content string) {
 	if _, err := io.WriteString(connection, content); err != nil {
 		server.t.Error(err)
 	}
+}
+
+func (server *testServer) readData(listener net.Listener) {
+	if listener == nil {
+		server.t.Error("missing data listener")
+		return
+	}
+	defer listener.Close()
+	connection, err := listener.Accept()
+	if err != nil {
+		server.t.Error(err)
+		return
+	}
+	defer connection.Close()
+	if server.mode != TLSNone {
+		connection = tls.Server(connection, &tls.Config{Certificates: []tls.Certificate{server.certificate}})
+	}
+	content, err := io.ReadAll(connection)
+	if err != nil {
+		server.t.Error(err)
+		return
+	}
+	server.mutex.Lock()
+	server.uploaded = string(content)
+	server.mutex.Unlock()
 }
 
 func writeReply(writer *bufio.Writer, reply string) {

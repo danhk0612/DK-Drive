@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"math"
 	"net"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -41,10 +42,11 @@ type Config struct {
 }
 
 type Backend struct {
-	mutex  sync.Mutex
-	client *ftpclient.ServerConn
-	root   string
-	closed bool
+	mutex   sync.Mutex
+	client  *ftpclient.ServerConn
+	root    string
+	timeout time.Duration
+	closed  bool
 }
 
 func New(ctx context.Context, config Config) (*Backend, error) {
@@ -59,7 +61,7 @@ func New(ctx context.Context, config Config) (*Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{client: client, root: root}, nil
+	return &Backend{client: client, root: root, timeout: config.Timeout}, nil
 }
 
 func connect(ctx context.Context, config Config) (*ftpclient.ServerConn, string, error) {
@@ -238,24 +240,97 @@ func (reader *lockedReadCloser) Close() error {
 	return err
 }
 
-func (backend *Backend) OpenWrite(context.Context, string, vfs.WriteOptions) (vfs.WriteHandle, error) {
-	return nil, errors.ErrUnsupported
+func (backend *Backend) OpenWrite(ctx context.Context, name string, options vfs.WriteOptions) (vfs.WriteHandle, error) {
+	remote, err := backend.remotePath(name)
+	if err != nil {
+		return nil, err
+	}
+	temporary, err := os.CreateTemp("", "dkdrive-ftp-*")
+	if err != nil {
+		return nil, fmt.Errorf("FTP 쓰기 임시 파일 생성 실패: %w", err)
+	}
+	handle := &uploadHandle{
+		backend: backend, remote: remote, file: temporary, path: temporary.Name(),
+		append: options.Append, dirty: options.Truncate,
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			temporary.Close()
+			os.Remove(temporary.Name())
+		}
+	}()
+
+	if !options.Truncate {
+		reader, openErr := backend.OpenRead(ctx, name)
+		if openErr == nil {
+			_, copyErr := io.Copy(temporary, reader)
+			closeErr := reader.Close()
+			if err := errors.Join(copyErr, closeErr); err != nil {
+				return nil, fmt.Errorf("FTP 기존 파일 임시 저장 실패: %w", err)
+			}
+		} else if !options.Create || !errors.Is(openErr, fs.ErrNotExist) {
+			return nil, openErr
+		} else {
+			handle.dirty = true
+		}
+	} else if !options.Create {
+		if _, err := backend.Stat(ctx, name); err != nil {
+			return nil, err
+		}
+	}
+	cleanup = false
+	return handle, nil
 }
 
-func (backend *Backend) Mkdir(context.Context, string) error {
-	return errors.ErrUnsupported
+func (backend *Backend) Mkdir(ctx context.Context, name string) error {
+	remote, err := backend.remotePath(name)
+	if err != nil {
+		return err
+	}
+	return backend.withClient(ctx, "폴더 생성", func(client *ftpclient.ServerConn) error {
+		return client.MakeDir(remote)
+	})
 }
 
-func (backend *Backend) Remove(context.Context, string, bool) error {
-	return errors.ErrUnsupported
+func (backend *Backend) Remove(ctx context.Context, name string, directory bool) error {
+	remote, err := backend.remotePath(name)
+	if err != nil {
+		return err
+	}
+	return backend.withClient(ctx, "삭제", func(client *ftpclient.ServerConn) error {
+		if directory {
+			return client.RemoveDir(remote)
+		}
+		return client.Delete(remote)
+	})
 }
 
-func (backend *Backend) Rename(context.Context, string, string) error {
-	return errors.ErrUnsupported
+func (backend *Backend) Rename(ctx context.Context, oldName, newName string) error {
+	oldRemote, err := backend.remotePath(oldName)
+	if err != nil {
+		return err
+	}
+	newRemote, err := backend.remotePath(newName)
+	if err != nil {
+		return err
+	}
+	return backend.withClient(ctx, "이름 변경 및 이동", func(client *ftpclient.ServerConn) error {
+		return client.Rename(oldRemote, newRemote)
+	})
 }
 
-func (backend *Backend) SetModTime(context.Context, string, time.Time) error {
-	return errors.ErrUnsupported
+func (backend *Backend) SetModTime(ctx context.Context, name string, modTime time.Time) error {
+	remote, err := backend.remotePath(name)
+	if err != nil {
+		return err
+	}
+	return backend.withClient(ctx, "수정 시간 설정", func(client *ftpclient.ServerConn) error {
+		if !client.IsSetTimeSupported() {
+			return errors.ErrUnsupported
+		}
+		return client.SetTime(remote, modTime)
+	})
 }
 
 func (backend *Backend) SetReadOnly(context.Context, string, bool) error {
@@ -282,6 +357,95 @@ func (backend *Backend) lock(ctx context.Context) (*ftpclient.ServerConn, error)
 		return nil, net.ErrClosed
 	}
 	return backend.client, nil
+}
+
+func (backend *Backend) withClient(ctx context.Context, operation string, action func(*ftpclient.ServerConn) error) error {
+	client, err := backend.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer backend.mutex.Unlock()
+	if err := action(client); err != nil {
+		return fmt.Errorf("FTP %s 실패: %w", operation, err)
+	}
+	return nil
+}
+
+type uploadHandle struct {
+	mutex   sync.Mutex
+	backend *Backend
+	remote  string
+	file    *os.File
+	path    string
+	append  bool
+	dirty   bool
+	closed  bool
+}
+
+func (handle *uploadHandle) WriteAt(data []byte, offset int64) (int, error) {
+	handle.mutex.Lock()
+	defer handle.mutex.Unlock()
+	if handle.closed {
+		return 0, os.ErrClosed
+	}
+	if handle.append {
+		info, err := handle.file.Stat()
+		if err != nil {
+			return 0, err
+		}
+		offset = info.Size()
+	}
+	written, err := handle.file.WriteAt(data, offset)
+	if written > 0 {
+		handle.dirty = true
+	}
+	return written, err
+}
+
+func (handle *uploadHandle) Sync() error {
+	handle.mutex.Lock()
+	defer handle.mutex.Unlock()
+	return handle.syncLocked()
+}
+
+func (handle *uploadHandle) syncLocked() error {
+	if handle.closed {
+		return os.ErrClosed
+	}
+	if err := handle.file.Sync(); err != nil {
+		return err
+	}
+	if !handle.dirty {
+		return nil
+	}
+	info, err := handle.file.Stat()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), handle.backend.timeout)
+	defer cancel()
+	client, err := handle.backend.lock(ctx)
+	if err != nil {
+		return err
+	}
+	err = client.Stor(handle.remote, io.NewSectionReader(handle.file, 0, info.Size()))
+	handle.backend.mutex.Unlock()
+	if err != nil {
+		return fmt.Errorf("FTP 파일 업로드 실패: %w", err)
+	}
+	handle.dirty = false
+	return nil
+}
+
+func (handle *uploadHandle) Close() error {
+	handle.mutex.Lock()
+	defer handle.mutex.Unlock()
+	if handle.closed {
+		return os.ErrClosed
+	}
+	syncErr := handle.syncLocked()
+	handle.closed = true
+	return errors.Join(syncErr, handle.file.Close(), os.Remove(handle.path))
 }
 
 var _ vfs.Backend = (*Backend)(nil)
