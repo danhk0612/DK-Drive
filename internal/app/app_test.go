@@ -22,7 +22,7 @@ func TestDefaultMessageShowsCurrentStage(t *testing.T) {
 		t.Fatalf("run(): %v", err)
 	}
 	message := output.String()
-	if !strings.Contains(message, Version) || !strings.Contains(message, "0.3 WebDAV") {
+	if !strings.Contains(message, Version) || !strings.Contains(message, "0.5 프로그램 기능") {
 		t.Fatalf("default output = %q", message)
 	}
 }

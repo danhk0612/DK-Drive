@@ -5,7 +5,7 @@ Windows 드라이브 문자로 마운트하는 경량 네트워크 드라이브 
 
 ## 현재 상태
 
-현재 버전은 `0.4.0-dev`입니다. WinFsp 메모리 드라이브와 실제 SFTP 드라이브의
+현재 버전은 `0.5.0-dev`입니다. WinFsp 메모리 드라이브와 실제 SFTP 드라이브의
 연결·읽기·쓰기·이름 변경·이동·삭제·읽기 전용·자동 재연결을 Windows
 탐색기와 메모장에서 검증했습니다. 기본 로컬 스테이징 캐시와 Windows 수정
 시간·읽기 전용 속성 처리도 검증하여 0.2 SFTP 기본 범위를 완료했습니다.
@@ -16,7 +16,13 @@ Windows 드라이브 문자로 마운트하는 경량 네트워크 드라이브 
 
 0.4 FTP/FTPS 백엔드는 FTP, Explicit FTPS, Implicit FTPS의 비밀번호 인증,
 원격 시작 경로, 목록, 읽기, 쓰기와 파일 작업을 모의 서버 자동 테스트로
-검증했습니다. WinFsp 마운트도 구현했으며 실제 서버와 Windows 검증 전입니다.
+검증했습니다. 일반 FTP와 Explicit FTPS는 Synology에서 CLI, WinFsp 기본 파일
+작업, 읽기 전용 기본 동작, 탐색기·메모장과 제어 연결 단절 복구까지 확인했습니다.
+Implicit FTPS 실서버 검증과 확장 장애·읽기 전용 검증은 아직 남아 있습니다.
+
+0.5의 첫 Windows GUI, 복수 연결 관리, 트레이, 설정 저장, 선택적 DPAPI 자격
+증명 저장과 자동 시작/자동 연결을 구현했습니다. GUI 실환경 검증 전이며,
+기존 프로토콜별 CLI는 그대로 유지합니다.
 
 ## 목표 기능
 
@@ -46,14 +52,19 @@ winget install --exact --id WinFsp.WinFsp
 ```powershell
 go test ./...
 go vet ./...
-go build -o bin/dkdrive.exe ./cmd/dkdrive
+go build -ldflags="-H=windowsgui" -o bin/dkdrive.exe ./cmd/dkdrive
 ```
 
-현재 실행 파일은 버전과 개발 상태만 표시합니다.
+Windows에서 인수 없이 실행하면 연결 관리 GUI가 열립니다.
 
 ```powershell
-.\bin\dkdrive.exe --version
+.\bin\dkdrive.exe
 ```
+
+프로필을 입력하고 **저장 → 선택 연결** 순으로 사용합니다. 비밀번호 저장과
+Windows 로그인 시 실행, 연결별 자동 연결은 기본 해제되어 있습니다. 상세 동작과
+수동 검증 순서는 [0.5 데스크톱 검증](docs/desktop-validation.md)을 참고하세요.
+버전 확인은 `go run ./cmd/dkdrive --version`으로 할 수 있습니다.
 
 WinFsp 메모리 마운트 검증 방법은
 [WinFsp 메모리 마운트 기술 검증](docs/winfsp-memory-spike.md)을 참고하세요.
@@ -80,10 +91,12 @@ FTP와 FTPS 연결 및 읽기 검증 방법은
 - SFTP에는 별도 생성·접근 시간이 없어 Windows의 생성·접근 시간에 수정 시간을 표시
 - Hidden, System, Archive 등 SFTP에 대응값이 없는 Windows 속성 변경 미지원
 - WebDAV 수정 시간과 파일별 ReadOnly 속성 변경 미지원
-- FTP/FTPS 백엔드와 WinFsp 마운트는 자동 테스트만 완료했으며 실제 서버 검증 전
-- FTP/FTPS 자동 재연결 미구현
-- GUI와 트레이 미구현
-- 보안 자격 증명 저장 미구현
+- Implicit FTPS 실서버 검증 전; 장시간 단절·전송 중 복구 검증 전
+- GUI·트레이·복수 드라이브·자동 시작은 구현 후 실환경 검증 대기
+- GUI 해제는 열린 파일/폴더가 있거나 파일 닫기·업로드 실패가 기록되면 차단
+- 실패한 스테이징 파일 복구 UI는 아직 없으며, 캐시 보존 후 수동 복구 필요
+- DPAPI 저장 비밀값은 현재 Windows 사용자/PC에 종속; 다른 PC로 복사해 재사용 불가
+- GUI는 0.5 첫 화면이며 고급·캐시 탭과 제품 아이콘은 후속 작업
 
 개발 순서는 [로드맵](docs/roadmap.md)을 참고하세요.
 

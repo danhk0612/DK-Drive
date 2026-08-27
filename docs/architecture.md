@@ -75,3 +75,38 @@ FTP 제어 연결 하나는 동시에 여러 명령이나 데이터 전송을 �
 VFS의 임의 위치 쓰기는 로컬 임시 파일에 모은 뒤 `Sync` 또는 `Close`에서
 `STOR`로 전체 파일을 반영한다. 서버 반영이 실패하면 호출자에게 오류를 반환하고
 마운트 계층이 관리하는 원본 스테이징 데이터를 유지해 재시도를 허용한다.
+
+## ADR-005: 0.5 Windows 데스크톱과 연결 수명
+
+- 상태: 첫 구현, 실환경 검증 대기
+- 날짜: 2026-08-27
+
+추가 GUI 런타임 없이 Win32 기본 컨트롤과 Shell 알림 아이콘을 사용한다.
+UI는 하나의 OS 스레드에서 소유하고, 연결/해제는 작업 goroutine에서 실행한 뒤
+창 메시지로 결과를 전달한다. 첫 구현의 UI 작업은 한 번에 하나씩 실행하지만,
+성공한 여러 마운트는 같은 프로세스에서 동시에 유지한다. 드라이브 문자와
+연결 ID는 연결을 시작하기 전에 예약하며, 개별 연결 실패가 다른 연결을 종료하지 않는다.
+
+프로토콜 CLI를 subprocess로 실행하지 않고 기존 백엔드와 WinFsp 어댑터를
+직접 재사용한다. 비밀값을 명령행·환경변수로 전달하지 않는다. SFTP의
+known_hosts 검증과 기존 메타데이터 어댑터를 유지한다. TLS 검증은 기본 활성화다.
+
+설정은 사용자 설정 디렉터리의 `DKDrive/settings.json`에 저장한다. 선택한
+비밀값만 현재 사용자 DPAPI로 보호하며, 복호화 실패 시 평문 저장으로 대체하지
+않는다. 버전/형식/중복 드라이브를 검사하고, 같은 디렉터리의 임시 파일을
+완전히 쓰고 동기화한 다음 교체한다. 읽을 수 없는 기존 설정을 자동 초기화하지 않는다.
+
+GUI 마운트에는 별도 수명 보호 래퍼를 추가했다. 파일/폴더 핸들이 하나라도
+열려 있으면 해제를 거부한다. 닫힌 핸들의 업로드/닫기 실패도 기억해 조용히
+종료하지 않고 캐시 경로와 오류를 알린다. 정상 해제는 새 경로 작업을 차단한 뒤
+WinFsp를 종료하고 백엔드를 닫는다. 기존 CLI의 종료 동작은 변경하지 않았다.
+
+Windows 로그인 시 실행은 사용자가 선택한 경우에만 HKCU Run의 DKDrive
+값을 등록한다. 연결별 AutoConnect와 독립적이며 기본 등록은 하지 않는다.
+트레이 실패 시 창을 유지하고, 프로그램의 명시적 종료는 모든 연결이 안전하게
+해제된 경우에만 완료한다. OS 강제 종료·전원 차단에 대한 보장은 하지 않는다.
+
+참고: [Win32 창 생성](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowexw),
+[Shell 알림 아이콘](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyiconw),
+[DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata),
+[Run 레지스트리](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys).

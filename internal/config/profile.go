@@ -23,22 +23,31 @@ const (
 )
 
 type Profile struct {
-	Name          string
-	Protocol      Protocol
-	DriveLetter   string
-	VolumeName    string
-	Host          string
-	Port          uint16
-	RemotePath    string
-	Username      string
-	AuthMethod    AuthMethod
-	PrivateKey    string
-	AutoConnect   bool
-	ReadOnly      bool
-	AutoReconnect bool
+	Name                  string
+	Protocol              Protocol
+	DriveLetter           string
+	VolumeName            string
+	Host                  string
+	Port                  uint16
+	RemotePath            string
+	Username              string
+	AuthMethod            AuthMethod
+	PrivateKey            string
+	AutoConnect           bool
+	ReadOnly              bool
+	AutoReconnect         bool
+	WebDAVScheme          string
+	FTPSMode              string
+	KnownHosts            string
+	InsecureSkipTLSVerify bool
 }
 
 func (p Profile) Validate() error {
+	for _, value := range []string{p.Name, p.VolumeName, p.Host, p.RemotePath, p.Username, p.PrivateKey, p.KnownHosts} {
+		if strings.ContainsRune(value, 0) {
+			return errors.New("설정 값에는 NUL 문자를 사용할 수 없습니다")
+		}
+	}
 	if strings.TrimSpace(p.Name) == "" {
 		return errors.New("연결 이름이 필요합니다")
 	}
@@ -62,6 +71,18 @@ func (p Profile) Validate() error {
 	}
 	if p.AuthMethod == AuthPrivateKey && strings.TrimSpace(p.PrivateKey) == "" {
 		return errors.New("개인키 인증에는 개인키 경로가 필요합니다")
+	}
+	if p.AuthMethod == AuthPrivateKey && p.Protocol != ProtocolSFTP {
+		return errors.New("개인키 인증은 SFTP에서만 사용할 수 있습니다")
+	}
+	if p.Protocol == ProtocolWebDAV && p.WebDAVScheme != "" && p.WebDAVScheme != "http" && p.WebDAVScheme != "https" {
+		return errors.New("WebDAV 방식은 http 또는 https여야 합니다")
+	}
+	if p.Protocol == ProtocolFTPS && p.FTPSMode != "" && p.FTPSMode != "explicit-ftps" && p.FTPSMode != "implicit-ftps" {
+		return errors.New("FTPS 방식은 explicit-ftps 또는 implicit-ftps여야 합니다")
+	}
+	if p.InsecureSkipTLSVerify && (p.Protocol == ProtocolSFTP || p.Protocol == ProtocolFTP || (p.Protocol == ProtocolWebDAV && p.WebDAVScheme == "http")) {
+		return errors.New("인증서 검증 우회는 HTTPS/FTPS에서만 사용할 수 있습니다")
 	}
 	return nil
 }

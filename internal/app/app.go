@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const Version = "0.3.0-dev"
+const Version = "0.5.0-dev"
 
 func Run(args []string) error {
 	return run(args, os.Stdout)
@@ -15,7 +15,7 @@ func Run(args []string) error {
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		_, err := fmt.Fprintf(output, "DKDrive %s\n0.3 WebDAV 기본 기능 개발 단계입니다.\n", Version)
+		_, err := fmt.Fprintf(output, "DKDrive %s\n0.5 프로그램 기능 개발 단계입니다. GUI는 Windows에서 실행하세요.\n", Version)
 		return err
 	}
 

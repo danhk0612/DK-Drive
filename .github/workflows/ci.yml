@@ -43,4 +43,4 @@ jobs:
         run: go vet ./...
 
       - name: Build
-        run: go build -o bin/dkdrive.exe ./cmd/dkdrive
+        run: go build -ldflags="-H=windowsgui" -o bin/dkdrive.exe ./cmd/dkdrive
