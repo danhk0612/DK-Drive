@@ -5,6 +5,7 @@ package mount
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -35,6 +36,21 @@ func TestReadOnlyGoFileSystemRejectsWritableOpen(t *testing.T) {
 		if _, err := filesystem.OpenFile("file.txt", flag, 0o644); !errors.Is(err, fs.ErrPermission) {
 			t.Errorf("OpenFile(flag=%d) error = %v, want fs.ErrPermission", flag, err)
 		}
+	}
+}
+
+func TestGoFileSystemStatReturnsOSNotExist(t *testing.T) {
+	store, err := localcache.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("cache.New(): %v", err)
+	}
+	filesystem := NewGoFileSystem(
+		&stagingBackend{statErr: fmt.Errorf("remote stat: %w", fs.ErrNotExist)},
+		false,
+		store,
+	)
+	if _, err := filesystem.Stat("missing.txt"); !os.IsNotExist(err) {
+		t.Fatalf("Stat() error = %v, want os.IsNotExist", err)
 	}
 }
 
@@ -151,10 +167,14 @@ func assertCacheEntryCount(t *testing.T, directory string, want int) {
 
 type stagingBackend struct {
 	openWriteErr error
+	statErr      error
 	modTime      time.Time
 }
 
 func (backend *stagingBackend) Stat(context.Context, string) (vfs.Entry, error) {
+	if backend.statErr != nil {
+		return vfs.Entry{}, backend.statErr
+	}
 	return vfs.Entry{}, os.ErrNotExist
 }
 
