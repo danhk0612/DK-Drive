@@ -33,6 +33,14 @@ $WebDAVSkipTLSVerify = $true
 
 ## 3. 목록과 읽기
 
+2026-08-27 Synology 실서버 검증 상태:
+
+- [x] HTTPS 5006 연결 및 Basic 인증
+- [x] `/home/` 원격 시작 경로 확인
+- [x] PROPFIND 디렉터리 목록
+- [x] 한글 파일명과 서버 수정 시간 해석
+- [ ] 기존 파일 GET 읽기
+
 ```powershell
 .\bin\dkdrive-webdav.exe `
     -scheme $WebDAVScheme `
