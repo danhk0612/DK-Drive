@@ -39,7 +39,7 @@ $WebDAVSkipTLSVerify = $true
 - [x] `/home/` 원격 시작 경로 확인
 - [x] PROPFIND 디렉터리 목록
 - [x] 한글 파일명과 서버 수정 시간 해석
-- [ ] 기존 파일 GET 읽기
+- [x] 기존 한글 파일 GET 읽기와 내용 일치 확인
 
 ```powershell
 .\bin\dkdrive-webdav.exe `
@@ -65,6 +65,12 @@ $WebDAVSkipTLSVerify = $true
 ```
 
 ## 4. 서버 기능 조회
+
+2026-08-27 Synology 실서버 OPTIONS 결과:
+
+- DAV 클래스: `1`, `2`, `<http://apache.org/dav/propset/fs/1>`
+- 허용 메서드: `COPY`, `DELETE`, `GET`, `HEAD`, `LOCK`, `MOVE`, `OPTIONS`, `POST`, `PROPFIND`, `PROPPATCH`, `PUT`, `TRACE`, `UNLOCK`
+- DAV 클래스 2와 `LOCK`/`UNLOCK`이 확인되어 잠금 검증 가능
 
 이 단계는 원격 파일을 변경하지 않는다.
 
