@@ -64,6 +64,33 @@ func TestBackendListsAndReads(t *testing.T) {
 	}
 }
 
+func TestInsecureSkipTLSVerify(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writeMultistatus(writer, `<d:response><d:href>/dav/home/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`)
+	}))
+	defer server.Close()
+
+	parsed := mustURL(t, server.URL)
+	port, err := strconv.ParseUint(parsed.Port(), 10, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := Config{
+		Scheme: "https", Host: parsed.Hostname(), Port: uint16(port),
+		Username: "tester", Password: "secret", Root: "/dav/home",
+	}
+	if backend, err := New(context.Background(), config); err == nil {
+		backend.Close()
+		t.Fatal("New() accepted an untrusted certificate without explicit opt-in")
+	}
+	config.InsecureSkipTLSVerify = true
+	backend, err := New(context.Background(), config)
+	if err != nil {
+		t.Fatalf("New() with InsecureSkipTLSVerify: %v", err)
+	}
+	backend.Close()
+}
+
 func TestResourceURLRejectsParentTraversal(t *testing.T) {
 	backend := Backend{baseURL: mustURL(t, "https://example.test/dav/home")}
 	if _, err := backend.resourceURL("../secret"); err == nil {
