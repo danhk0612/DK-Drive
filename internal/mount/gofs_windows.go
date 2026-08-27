@@ -142,6 +142,24 @@ func (filesystem *goFileSystem) Remove(name string) error {
 }
 
 func (filesystem *goFileSystem) stat(name string) (vfs.Entry, error) {
+	// WinFsp can issue a pathname lookup before the previous handle's Close.
+	// Publish only this path's pending writes before consulting the backend.
+	var syncErr error
+	filesystem.openFiles.Range(func(key, _ any) bool {
+		file := key.(*stagedFile)
+		if file.name != name {
+			return true
+		}
+		file.mutex.Lock()
+		if !file.closed && file.dirty {
+			syncErr = file.syncLocked()
+		}
+		file.mutex.Unlock()
+		return syncErr == nil
+	})
+	if syncErr != nil {
+		return vfs.Entry{}, syncErr
+	}
 	ctx, cancel := operationContext()
 	defer cancel()
 	return filesystem.backend.Stat(ctx, name)
@@ -248,17 +266,23 @@ type stagedFile struct {
 }
 
 func (file *stagedFile) Write(buffer []byte) (int, error) {
-	file.markDirty()
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	file.markDirtyLocked()
 	return file.File.Write(buffer)
 }
 
 func (file *stagedFile) WriteAt(buffer []byte, offset int64) (int, error) {
-	file.markDirty()
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	file.markDirtyLocked()
 	return file.File.WriteAt(buffer, offset)
 }
 
 func (file *stagedFile) Truncate(size int64) error {
-	file.markDirty()
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	file.markDirtyLocked()
 	return file.File.Truncate(size)
 }
 
@@ -287,6 +311,10 @@ func (file *stagedFile) Readdir(int) ([]os.FileInfo, error) {
 func (file *stagedFile) Sync() error {
 	file.mutex.Lock()
 	defer file.mutex.Unlock()
+	return file.syncLocked()
+}
+
+func (file *stagedFile) syncLocked() error {
 	if file.closed {
 		return os.ErrClosed
 	}
@@ -314,12 +342,12 @@ func (file *stagedFile) Sync() error {
 }
 
 func (file *stagedFile) Close() error {
-	syncErr := file.Sync()
 	file.mutex.Lock()
 	if file.closed {
 		file.mutex.Unlock()
 		return os.ErrClosed
 	}
+	syncErr := file.syncLocked()
 	file.closed = true
 	closeErr := file.File.Close()
 	file.mutex.Unlock()
@@ -344,9 +372,7 @@ func (file *stagedFile) setModTime(modTime time.Time) error {
 	return nil
 }
 
-func (file *stagedFile) markDirty() {
-	file.mutex.Lock()
-	defer file.mutex.Unlock()
+func (file *stagedFile) markDirtyLocked() {
 	if file.writePermitted {
 		file.dirty = true
 		file.requestedTime = time.Time{}
