@@ -20,7 +20,7 @@ go build -o bin/dkdrive-webdav-mount.exe ./cmd/dkdrive-webdav-mount
 
 ## 2. HTTPS 연결 변수
 
-`$WebDAVHost`에는 가능하면 Synology WebDAV 인증서에 포함된 호스트 이름을 사용한다. IP 주소를 사용하면 인증서 이름 불일치가 발생할 수 있다.
+`$WebDAVHost`에는 가능하면 Synology WebDAV 인증서에 포함된 호스트 이름을 사용한다. 현재처럼 IP 주소를 사용해 인증서 이름 불일치가 발생하면, 신뢰할 수 있는 내부 NAS를 직접 지정한 경우에만 `$WebDAVSkipTLSVerify`를 `$true`로 둔다. 이 옵션은 인증서의 신원과 신뢰 체인 검증을 모두 건너뛰므로 외부망에서는 사용하지 않는다.
 
 ```powershell
 $WebDAVScheme = 'https'
@@ -28,6 +28,7 @@ $WebDAVHost = '192.168.0.150'
 $WebDAVPort = 5006
 $WebDAVUser = 'danhk0612'
 $WebDAVRoot = '/home/'
+$WebDAVSkipTLSVerify = $true
 ```
 
 ## 3. 목록과 읽기
@@ -38,7 +39,8 @@ $WebDAVRoot = '/home/'
     -host $WebDAVHost `
     -port $WebDAVPort `
     -user $WebDAVUser `
-    -root $WebDAVRoot
+    -root $WebDAVRoot `
+    "-insecure-skip-tls-verify=$WebDAVSkipTLSVerify"
 ```
 
 목록이 정상 출력되면 기존 파일을 읽는다.
@@ -50,6 +52,7 @@ $WebDAVRoot = '/home/'
     -port $WebDAVPort `
     -user $WebDAVUser `
     -root $WebDAVRoot `
+    "-insecure-skip-tls-verify=$WebDAVSkipTLSVerify" `
     -read 'my.cnf'
 ```
 
@@ -64,6 +67,7 @@ $WebDAVRoot = '/home/'
     -port $WebDAVPort `
     -user $WebDAVUser `
     -root $WebDAVRoot `
+    "-insecure-skip-tls-verify=$WebDAVSkipTLSVerify" `
     -capabilities
 ```
 
@@ -80,6 +84,7 @@ $WebDAVRoot = '/home/'
     -port $WebDAVPort `
     -user $WebDAVUser `
     -root $WebDAVRoot `
+    "-insecure-skip-tls-verify=$WebDAVSkipTLSVerify" `
     -write-test
 ```
 
@@ -94,6 +99,7 @@ $WebDAVRoot = '/home/'
     -port $WebDAVPort `
     -user $WebDAVUser `
     -root $WebDAVRoot `
+    "-insecure-skip-tls-verify=$WebDAVSkipTLSVerify" `
     -lock-test
 ```
 
@@ -108,6 +114,7 @@ $WebDAVRoot = '/home/'
     -port $WebDAVPort `
     -user $WebDAVUser `
     -root $WebDAVRoot `
+    "-insecure-skip-tls-verify=$WebDAVSkipTLSVerify" `
     -mount 'X:'
 ```
 
@@ -143,6 +150,7 @@ Test-Path $TestDir
     -port $WebDAVPort `
     -user $WebDAVUser `
     -root $WebDAVRoot `
+    "-insecure-skip-tls-verify=$WebDAVSkipTLSVerify" `
     -mount 'X:' `
     -read-only
 ```
@@ -178,5 +186,6 @@ $WebDAVPort = 5005
 
 - WebDAV 수정 시간 설정 미지원
 - 파일별 Windows ReadOnly 속성 변경 미지원
-- 사용자 지정 CA 인증서 파일과 인증서 검증 우회 옵션 미지원
+- 사용자 지정 CA 인증서 파일 미지원
+- `-insecure-skip-tls-verify`는 명시적으로 지정한 경우에만 인증서 검증을 우회
 - 중단된 HTTP 전송 이어받기 미지원
