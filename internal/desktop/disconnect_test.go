@@ -44,12 +44,12 @@ func disconnectFixture(t *testing.T, sessions ...*disconnectSession) (*connectio
 func TestDisconnectDoesNotPromptWhenSafe(t *testing.T) {
 	s := &disconnectSession{}
 	m, profiles := disconnectFixture(t, s)
-	message, err := disconnectProfiles(m, profiles, func(config.SavedProfile, error) bool {
+	result := disconnectProfiles(m, profiles, func(config.SavedProfile, error) bool {
 		t.Fatal("prompted after successful close")
 		return true
 	})
-	if err != nil || message != "" || s.normal != 1 || s.forced != 0 || m.State("X") != "연결 안 됨" {
-		t.Fatal(message, err, s)
+	if result.err != nil || result.forceMessage != "" || len(result.canceled) != 0 || s.normal != 1 || s.forced != 0 || m.State("X") != "연결 안 됨" {
+		t.Fatal(result, s)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestDisconnectConfirmationAndPartialFailure(t *testing.T) {
 	x, y, z := &disconnectSession{normalErr: busy}, &disconnectSession{normalErr: busy}, &disconnectSession{}
 	m, profiles := disconnectFixture(t, x, y, z)
 	var prompted []string
-	message, err := disconnectProfiles(m, profiles, func(p config.SavedProfile, failure error) bool {
+	result := disconnectProfiles(m, profiles, func(p config.SavedProfile, failure error) bool {
 		if !errors.Is(failure, busy) || m.State(p.ID) != "연결됨" {
 			t.Fatal("prompt before normal failure restored state", failure)
 		}
@@ -68,8 +68,11 @@ func TestDisconnectConfirmationAndPartialFailure(t *testing.T) {
 	if len(prompted) != 2 || prompted[0] != "X" || prompted[1] != "Y" {
 		t.Fatal(prompted)
 	}
-	if !errors.Is(err, busy) || !strings.Contains(message, "Y: cache retained") {
-		t.Fatal(message, err)
+	if result.err != nil || !strings.Contains(result.forceMessage, "Y: cache retained") {
+		t.Fatal(result)
+	}
+	if len(result.canceled) != 1 || result.canceled[0] != "X (X:)" {
+		t.Fatal("wrong cancellation result", result.canceled)
 	}
 	if x.forced != 0 || y.forced != 1 || z.forced != 0 || x.normal != 1 || y.normal != 1 || z.normal != 1 {
 		t.Fatal("wrong calls", x, y, z)
@@ -83,9 +86,9 @@ func TestDisconnectForceFailureKeepsSession(t *testing.T) {
 	failure := errors.New("force failed")
 	s := &disconnectSession{normalErr: errors.New("busy"), forceErr: failure}
 	m, profiles := disconnectFixture(t, s)
-	_, err := disconnectProfiles(m, profiles, func(config.SavedProfile, error) bool { return true })
-	if !errors.Is(err, failure) || m.State("X") != "연결됨" {
-		t.Fatal(err)
+	result := disconnectProfiles(m, profiles, func(config.SavedProfile, error) bool { return true })
+	if !errors.Is(result.err, failure) || m.State("X") != "연결됨" {
+		t.Fatal(result.err)
 	}
 }
 

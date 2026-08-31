@@ -49,6 +49,9 @@ $HeldStream = [System.IO.File]::Open(
 GUI에서 Y: 선택 해제 → 실패 원인·프로필 이름·드라이브·데이터 손실 경고 확인 →
 **아니요** 선택. 기본 포커스도 아니요여야 한다.
 
+취소 후 별도의 빨간 오류창을 표시하지 않고, 주 창 상태 영역에 연결 유지 결과만
+표시해야 한다.
+
 ```powershell
 Test-Path 'Y:\' # True
 $HeldStream.ReadByte() # 오류 없이 읽힘

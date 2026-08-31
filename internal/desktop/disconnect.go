@@ -11,16 +11,22 @@ import (
 
 // Each failed profile requires its own confirmation; declining one must not
 // force another or undo drives that were already safely detached.
-func disconnectProfiles(manager *connection.Manager, profiles []config.SavedProfile, confirm func(config.SavedProfile, error) bool) (string, error) {
+type disconnectResult struct {
+	forceMessage string
+	canceled     []string
+	err          error
+}
+
+func disconnectProfiles(manager *connection.Manager, profiles []config.SavedProfile, confirm func(config.SavedProfile, error) bool) disconnectResult {
 	var messages []string
-	var result error
+	var result disconnectResult
 	for _, p := range profiles {
 		err := manager.Disconnect(p.ID)
 		if err == nil {
 			continue
 		}
 		if !confirm(p, err) {
-			result = errors.Join(result, fmt.Errorf("%s: 강제 해제 취소, 연결 유지: %w", p.Profile.Name, err))
+			result.canceled = append(result.canceled, fmt.Sprintf("%s (%s:)", p.Profile.Name, p.Profile.DriveLetter))
 			continue
 		}
 		message, err := manager.ForceDisconnect(p.ID)
@@ -28,10 +34,11 @@ func disconnectProfiles(manager *connection.Manager, profiles []config.SavedProf
 			messages = append(messages, p.Profile.Name+": "+message)
 		}
 		if err != nil {
-			result = errors.Join(result, fmt.Errorf("%s: 강제 해제 실패: %w", p.Profile.Name, err))
+			result.err = errors.Join(result.err, fmt.Errorf("%s: 강제 해제 실패: %w", p.Profile.Name, err))
 		}
 	}
-	return strings.Join(messages, "\n\n"), result
+	result.forceMessage = strings.Join(messages, "\n\n")
+	return result
 }
 
 func forceDisconnectPrompt(p config.SavedProfile, err error) string {

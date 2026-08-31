@@ -610,10 +610,9 @@ func (w *window) exit() {
 
 func (w *window) disconnect(profiles []config.SavedProfile, exiting bool) {
 	profiles = append([]config.SavedProfile(nil), profiles...)
-	var message string
+	var result disconnectResult
 	w.task(func() error {
-		var err error
-		message, err = disconnectProfiles(w.manager, profiles, func(p config.SavedProfile, failure error) bool {
+		result = disconnectProfiles(w.manager, profiles, func(p config.SavedProfile, failure error) bool {
 			answer := make(chan bool, 1)
 			w.results <- taskResult{answer: answer, confirm: func() bool {
 				w.show()
@@ -623,22 +622,25 @@ func (w *window) disconnect(profiles []config.SavedProfile, exiting bool) {
 			call("PostMessageW", w.hwnd, wmTaskDone, 0, 0)
 			return <-answer
 		})
-		return err
+		return result.err
 	}, func(err error) {
 		// Completion dialogs run a nested Windows message loop too. Keep tray
 		// commands blocked until the result is acknowledged (especially on exit).
 		w.setBusy(true)
 		defer w.setBusy(false)
-		w.report(err)
-		if message != "" {
-			w.show()
-			if err != nil {
-				message += "\n\n" + err.Error()
-			}
-			setText(w.status, message)
-			alert(w.hwnd, message)
+		if err != nil {
+			w.report(err)
+		} else if len(result.canceled) != 0 {
+			setText(w.status, "강제 해제를 취소하여 연결을 유지했습니다: "+strings.Join(result.canceled, ", "))
+		} else {
+			w.report(nil)
 		}
-		if exiting && err == nil {
+		if result.forceMessage != "" {
+			w.show()
+			setText(w.status, result.forceMessage)
+			alert(w.hwnd, result.forceMessage)
+		}
+		if exiting && err == nil && len(result.canceled) == 0 {
 			call("DestroyWindow", w.hwnd)
 		}
 	})
