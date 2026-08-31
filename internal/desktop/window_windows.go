@@ -38,6 +38,8 @@ const (
 	idDrive
 	idBrowseKey
 	idBrowseKnownHosts
+	idTogglePassword
+	idTogglePassphrase
 )
 
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
@@ -63,8 +65,9 @@ type window struct {
 	list, status, closeToTray, startup, saveButton                                               uintptr
 	deleteButton, connectButton, disconnectButton, connectAllButton, disconnectAllButton         uintptr
 	name, protocol, drive, port, host, root, user, volume, key, knownHosts, password, passphrase uintptr
-	keyBrowse, knownHostsBrowse                                                                  uintptr
+	keyBrowse, knownHostsBrowse, passwordToggle, passphraseToggle                                uintptr
 	readOnly, autoConnect, remember, insecure                                                    uintptr
+	passwordVisible, passphraseVisible                                                           bool
 	results                                                                                      chan taskResult
 }
 
@@ -318,7 +321,7 @@ func (w *window) build() error {
 		y := 108 + i*34
 		label(f.name, 470, y+2, 115)
 		width := 490
-		if i == 4 || i == 5 {
+		if i >= 4 {
 			width = 400
 		}
 		*f.target = edit("", 590, y, width, i >= 6)
@@ -327,6 +330,12 @@ func (w *window) build() error {
 		}
 		if i == 5 {
 			w.knownHostsBrowse = button("찾아보기…", 1000, y-2, 80, idBrowseKnownHosts)
+		}
+		if i == 6 {
+			w.passwordToggle = button("보기", 1000, y-2, 80, idTogglePassword)
+		}
+		if i == 7 {
+			w.passphraseToggle = button("보기", 1000, y-2, 80, idTogglePassphrase)
 		}
 	}
 	w.readOnly = checkbox("읽기 전용", 470, 386, 160, 0)
@@ -462,12 +471,40 @@ func (w *window) updateProtocolControls() {
 		int(send(w.protocol, cbGetCurSel, 0, 0)),
 		strings.TrimSpace(getText(w.key)) != "",
 	)
+	if !state.password && w.passwordVisible {
+		w.setSecretVisible(w.password, w.passwordToggle, &w.passwordVisible, false)
+	}
+	if !state.passphrase && w.passphraseVisible {
+		w.setSecretVisible(w.passphrase, w.passphraseToggle, &w.passphraseVisible, false)
+	}
 	for _, h := range []uintptr{w.key, w.knownHosts, w.keyBrowse, w.knownHostsBrowse} {
 		call("EnableWindow", h, enabledWord(state.sftp))
 	}
 	call("EnableWindow", w.password, enabledWord(state.password))
 	call("EnableWindow", w.passphrase, enabledWord(state.passphrase))
+	call("EnableWindow", w.passwordToggle, enabledWord(state.password))
+	call("EnableWindow", w.passphraseToggle, enabledWord(state.passphrase))
 	call("EnableWindow", w.insecure, enabledWord(state.tls))
+}
+
+func secretDisplay(visible bool) (uintptr, string) {
+	if visible {
+		return 0, "숨기기"
+	}
+	return uintptr('*'), "보기"
+}
+
+func (w *window) setSecretVisible(input, toggle uintptr, visible *bool, next bool) {
+	*visible = next
+	passwordCharacter, buttonText := secretDisplay(next)
+	send(input, 0xcc, passwordCharacter, 0) // EM_SETPASSWORDCHAR
+	setText(toggle, buttonText)
+	call("InvalidateRect", input, 0, 1)
+}
+
+func (w *window) maskSecrets() {
+	w.setSecretVisible(w.password, w.passwordToggle, &w.passwordVisible, false)
+	w.setSecretVisible(w.passphrase, w.passphraseToggle, &w.passphraseVisible, false)
 }
 
 func (w *window) task(fn func() error, done func(error)) {
@@ -705,6 +742,7 @@ func (w *window) newProfile() {
 	for _, h := range []uintptr{w.readOnly, w.autoConnect, w.remember, w.insecure} {
 		check(h, false)
 	}
+	w.maskSecrets()
 	w.updateProtocolControls()
 	setText(w.status, "새 연결 설정을 입력하세요.")
 	w.clearDirty()
@@ -776,6 +814,7 @@ func (w *window) loadEditor(index int) {
 	w.secretFailed = err != nil
 	setText(w.password, s.Password)
 	setText(w.passphrase, s.Passphrase)
+	w.maskSecrets()
 	w.updateProtocolControls()
 	if err != nil {
 		w.report(err)
@@ -1098,6 +1137,12 @@ func (w *window) command(id, notice int, control uintptr) {
 			"known_hosts 파일", "known_hosts*",
 			"모든 파일 (*.*)", "*.*",
 		))
+	case idTogglePassword:
+		w.setSecretVisible(w.password, w.passwordToggle, &w.passwordVisible, !w.passwordVisible)
+		call("SetFocus", w.password)
+	case idTogglePassphrase:
+		w.setSecretVisible(w.passphrase, w.passphraseToggle, &w.passphraseVisible, !w.passphraseVisible)
+		call("SetFocus", w.passphrase)
 	case idTestConnection:
 		p, s, err := w.readEditor()
 		if err != nil {

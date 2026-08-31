@@ -81,6 +81,15 @@ func TestProtocolControls(t *testing.T) {
 	}
 }
 
+func TestSecretDisplay(t *testing.T) {
+	if character, label := secretDisplay(false); character != '*' || label != "보기" {
+		t.Fatalf("masked display: character=%d label=%q", character, label)
+	}
+	if character, label := secretDisplay(true); character != 0 || label != "숨기기" {
+		t.Fatalf("visible display: character=%d label=%q", character, label)
+	}
+}
+
 func TestProfileListRows(t *testing.T) {
 	profiles := []config.SavedProfile{
 		{ID: "sftp", Profile: config.Profile{DriveLetter: "x", Name: "긴 한글 연결 이름", Protocol: config.ProtocolSFTP}},
