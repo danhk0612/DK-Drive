@@ -96,7 +96,8 @@ FTP와 FTPS 연결 및 읽기 검증 방법은
 - Hidden, System, Archive 등 SFTP에 대응값이 없는 Windows 속성 변경 미지원
 - WebDAV 수정 시간과 파일별 ReadOnly 속성 변경 미지원
 - Implicit FTPS 실서버 검증 전; 장시간 단절·전송 중 복구 검증 전
-- GUI 기본 검증과 WebDAV 쓰기는 완료; 실제 로그인 후 실행·GUI SFTP 쓰기는 검증 대기
+- GUI 기본 검증과 WebDAV 쓰기는 완료; 실제 로그인 후 실행은 검증 대기
+- 프로토콜별 GUI 전체 CRUD는 반복하지 않고 공통 GUI와 각 백엔드 검증 결과를 조합
 - GUI 일반 해제 실패 시 강제 해제 확인 (기본: 취소); 미업로드 데이터 손실 가능성 안내
 - 실패한 스테이징 파일 복구 UI는 아직 없으며, 캐시 보존 후 수동 복구 필요
 - DPAPI 저장 비밀값은 현재 Windows 사용자/PC에 종속; 다른 PC로 복사해 재사용 불가
