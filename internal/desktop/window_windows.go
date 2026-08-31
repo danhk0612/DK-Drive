@@ -1037,14 +1037,17 @@ func (w *window) handleListNotification(value uintptr) bool {
 	if value == 0 {
 		return false
 	}
-	header := (*notifyHeader)(unsafe.Pointer(value))
+	// Windows passes NMHDR as an ABI pointer-sized word. Reinterpret that word
+	// without uintptr arithmetic and use it only during this callback.
+	pointer := *(*unsafe.Pointer)(unsafe.Pointer(&value))
+	header := (*notifyHeader)(pointer)
 	if header.WindowFrom != w.list || header.Code != lvnItemChanged {
 		return false
 	}
 	if w.loading {
 		return true
 	}
-	notification := (*notifyListView)(unsafe.Pointer(value))
+	notification := (*notifyListView)(pointer)
 	if notification.Item >= 0 && notification.Changed&lvifState != 0 &&
 		notification.NewState&lvisSelected != 0 && notification.OldState&lvisSelected == 0 {
 		w.loadEditor(int(notification.Item))
