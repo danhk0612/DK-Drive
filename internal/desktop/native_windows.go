@@ -174,6 +174,6 @@ func (w *window) trayMenu() {
 	id := call("TrackPopupMenu", menu, 0x100|2, uintptr(pos.X), uintptr(pos.Y), 0, w.hwnd, 0)
 	call("PostMessageW", w.hwnd, 0, 0, 0)
 	if id != 0 {
-		w.command(int(id), 0)
+		w.command(int(id), 0, 0)
 	}
 }

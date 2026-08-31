@@ -49,7 +49,7 @@ type taskResult struct {
 type window struct {
 	hwnd, font, icon                                                                             uintptr
 	scale                                                                                        float64
-	hasTray, busy, secretFailed                                                                  bool
+	hasTray, busy, secretFailed, loading, dirty                                                  bool
 	taskbarCreated                                                                               uint32
 	settings                                                                                     config.Settings
 	filename                                                                                     string
@@ -57,7 +57,7 @@ type window struct {
 	sessionSecrets                                                                               map[string]config.Secrets
 	selected                                                                                     int
 	controls                                                                                     []uintptr
-	list, status, closeToTray, startup                                                           uintptr
+	list, status, closeToTray, startup, saveButton                                               uintptr
 	name, protocol, drive, port, host, root, user, volume, key, knownHosts, password, passphrase uintptr
 	readOnly, autoConnect, remember, insecure                                                    uintptr
 	results                                                                                      chan taskResult
@@ -170,7 +170,7 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 	if w != nil {
 		switch msg {
 		case wmCommand:
-			w.command(int(wp&0xffff), int(wp>>16))
+			w.command(int(wp&0xffff), int(wp>>16), lp)
 			return 0
 		case wmClose:
 			if w.busy {
@@ -228,6 +228,8 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 }
 
 func (w *window) build() error {
+	w.loading = true
+	defer func() { w.loading = false }()
 	var err error
 	add := func(class, text string, style uintptr, x, y, ww, hh, id int) uintptr {
 		if err != nil {
@@ -250,7 +252,9 @@ func (w *window) build() error {
 		send(h, 0xc5, 4096, 0)
 		return h
 	}
-	button := func(text string, x, y, ww, id int) { add("BUTTON", text, 0x10000, x, y, ww, 28, id) }
+	button := func(text string, x, y, ww, id int) uintptr {
+		return add("BUTTON", text, 0x10000, x, y, ww, 28, id)
+	}
 	checkbox := func(text string, x, y, ww, id int) uintptr {
 		return add("BUTTON", text, 0x10000|bsCheck, x, y, ww, 25, id)
 	}
@@ -258,7 +262,7 @@ func (w *window) build() error {
 	w.list = add("LISTBOX", "", 0x10000|0x800000|0x200000|1, 16, 40, 250, 348, idList)
 	button("새 연결", 16, 400, 78, idNew)
 	button("삭제", 102, 400, 78, idDelete)
-	button("저장", 188, 400, 78, idSave)
+	w.saveButton = button("저장", 188, 400, 78, idSave)
 	button("선택 연결", 16, 438, 120, idConnect)
 	button("선택 해제", 146, 438, 120, idDisconnect)
 	button("모두 연결", 16, 476, 120, idConnectAll)
@@ -301,7 +305,57 @@ func (w *window) build() error {
 		return startErr
 	}
 	check(w.startup, enabled)
+	w.clearDirty()
 	return err
+}
+
+func (w *window) markDirty() {
+	if w.loading || w.dirty {
+		return
+	}
+	w.dirty = true
+	setText(w.saveButton, "저장 *")
+	setText(w.status, "저장되지 않은 연결 설정 변경 사항이 있습니다.")
+}
+
+func (w *window) isProfileInput(h uintptr) bool {
+	for _, input := range []uintptr{
+		w.name, w.drive, w.port, w.host, w.root, w.user, w.volume,
+		w.key, w.knownHosts, w.password, w.passphrase,
+		w.readOnly, w.autoConnect, w.remember, w.insecure,
+	} {
+		if h == input {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *window) clearDirty() {
+	w.dirty = false
+	setText(w.saveButton, "저장")
+}
+
+func allowProfileChange(dirty bool, choice int, save func() bool) bool {
+	if !dirty {
+		return true
+	}
+	switch choice {
+	case 6: // IDYES
+		return save()
+	case 7: // IDNO
+		return true
+	default: // IDCANCEL and window close
+		return false
+	}
+}
+
+func (w *window) confirmProfileChange() bool {
+	if !w.dirty {
+		return true
+	}
+	choice := box(w.hwnd, "현재 연결 설정의 변경 사항을 저장할까요?\n\n예: 저장 후 이동\n아니요: 변경 사항을 버리고 이동\n취소: 현재 편집 화면 유지", 0x233)
+	return allowProfileChange(true, int(choice), w.save)
 }
 
 func (w *window) setBusy(value bool) {
@@ -359,6 +413,8 @@ func (w *window) refreshList() {
 }
 
 func (w *window) newProfile() {
+	w.loading = true
+	defer func() { w.loading = false }()
 	w.selected = -1
 	w.secretFailed = false
 	send(w.list, lbSetCurSel, ^uintptr(0), 0)
@@ -373,6 +429,7 @@ func (w *window) newProfile() {
 		check(h, false)
 	}
 	setText(w.status, "새 연결 설정을 입력하세요.")
+	w.clearDirty()
 }
 
 func protocolIndex(p config.Profile) int {
@@ -406,6 +463,16 @@ func (w *window) loadEditor(index int) {
 	if index < 0 || index >= len(w.settings.Profiles) {
 		return
 	}
+	if index != w.selected && !w.confirmProfileChange() {
+		if w.selected >= 0 {
+			send(w.list, lbSetCurSel, uintptr(w.selected), 0)
+		} else {
+			send(w.list, lbSetCurSel, ^uintptr(0), 0)
+		}
+		return
+	}
+	w.loading = true
+	defer func() { w.loading = false }()
 	w.selected = index
 	p := w.settings.Profiles[index]
 	v := p.Profile
@@ -429,6 +496,7 @@ func (w *window) loadEditor(index int) {
 	} else {
 		setText(w.status, "저장된 설정입니다. 변경 후에는 저장을 눌러주세요.")
 	}
+	w.clearDirty()
 }
 
 func (w *window) readEditor() (config.Profile, config.Secrets, error) {
@@ -469,38 +537,38 @@ func (w *window) readEditor() (config.Profile, config.Secrets, error) {
 	return p, secret, p.Validate()
 }
 
-func (w *window) save() {
+func (w *window) save() bool {
 	p, secret, err := w.readEditor()
 	if err != nil {
 		w.report(err)
-		return
+		return false
 	}
 	if p.AutoConnect && !checked(w.remember) && (p.AuthMethod == config.AuthPassword || secret.Passphrase != "") {
 		w.report(errors.New("다음 실행 때 자동 연결하려면 비밀번호/Passphrase 저장을 선택하세요"))
-		return
+		return false
 	}
 	if w.secretFailed && checked(w.remember) && secret.Password == "" && secret.Passphrase == "" {
 		w.report(errors.New("새 자격 증명을 입력하거나 저장 체크를 해제하세요; 기존 암호화 값을 빈 값으로 바꾸지 않습니다"))
-		return
+		return false
 	}
 	if p.InsecureSkipTLSVerify && box(w.hwnd, "서버 신원과 인증서 신뢰 검증을 건너뜁니다. 신뢰할 수 있는 테스트 서버에만 사용하세요. 저장할까요?", 0x34) != 6 {
-		return
+		return false
 	}
 	if (p.Protocol == config.ProtocolFTP || p.WebDAVScheme == "http") && box(w.hwnd, "이 연결은 비밀번호와 파일 내용을 평문으로 전송합니다. 저장할까요?", 0x34) != 6 {
-		return
+		return false
 	}
 	var saved config.SavedProfile
 	if w.selected >= 0 {
 		saved = w.settings.Profiles[w.selected]
 		if w.manager.State(saved.ID) != "연결 안 됨" {
 			w.report(errors.New("설정 변경 전에 연결을 해제하세요"))
-			return
+			return false
 		}
 	} else {
 		saved.ID, err = config.NewID()
 		if err != nil {
 			w.report(err)
-			return
+			return false
 		}
 	}
 	saved.Profile = p
@@ -509,7 +577,7 @@ func (w *window) save() {
 		saved.ProtectedSecret, err = config.SealSecrets(credential.DPAPI{}, secret)
 		if err != nil {
 			w.report(err)
-			return
+			return false
 		}
 	}
 	next := w.settings
@@ -523,14 +591,16 @@ func (w *window) save() {
 	}
 	if err := config.SaveSettings(w.filename, next); err != nil {
 		w.report(err)
-		return
+		return false
 	}
 	w.settings = next
 	w.selected = i
 	w.sessionSecrets[saved.ID] = secret
 	w.secretFailed = false
 	w.refreshList()
+	w.clearDirty()
 	setText(w.status, "설정을 저장했습니다. 선택 연결로 마운트하세요.")
+	return true
 }
 
 func (w *window) deleteProfile() {
@@ -646,13 +716,17 @@ func (w *window) disconnect(profiles []config.SavedProfile, exiting bool) {
 	})
 }
 
-func (w *window) command(id, notice int) {
+func (w *window) command(id, notice int, control uintptr) {
 	if id == idShow {
 		w.show()
 		return
 	}
 	if w.busy {
 		return
+	}
+	if !w.loading && ((id == 0 && w.isProfileInput(control) && (notice == 0 || notice == 0x300)) ||
+		(id == idProtocol && notice == 1)) {
+		w.markDirty()
 	}
 	if id >= 1000 && id < 1000+len(w.settings.Profiles) {
 		i := id - 1000
@@ -670,8 +744,10 @@ func (w *window) command(id, notice int) {
 			w.loadEditor(int(int32(send(w.list, lbGetCurSel, 0, 0))))
 		}
 	case idNew:
-		w.show()
-		w.newProfile()
+		if w.confirmProfileChange() {
+			w.show()
+			w.newProfile()
+		}
 	case idSave:
 		w.save()
 	case idTestConnection:

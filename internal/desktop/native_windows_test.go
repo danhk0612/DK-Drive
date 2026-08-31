@@ -44,3 +44,33 @@ func TestProtocolDisplayMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowProfileChange(t *testing.T) {
+	tests := []struct {
+		name       string
+		dirty      bool
+		choice     int
+		saveResult bool
+		want       bool
+		wantSave   bool
+	}{
+		{name: "clean", dirty: false, choice: 6, want: true},
+		{name: "save succeeds", dirty: true, choice: 6, saveResult: true, want: true, wantSave: true},
+		{name: "save fails", dirty: true, choice: 6, wantSave: true},
+		{name: "discard", dirty: true, choice: 7, want: true},
+		{name: "cancel", dirty: true, choice: 2},
+		{name: "dialog closed", dirty: true, choice: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			saved := false
+			got := allowProfileChange(tt.dirty, tt.choice, func() bool {
+				saved = true
+				return tt.saveResult
+			})
+			if got != tt.want || saved != tt.wantSave {
+				t.Fatalf("allow=%v save=%v; want allow=%v save=%v", got, saved, tt.want, tt.wantSave)
+			}
+		})
+	}
+}
