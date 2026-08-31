@@ -45,6 +45,37 @@ func TestProtocolDisplayMapping(t *testing.T) {
 	}
 }
 
+func TestAvailableDriveLetters(t *testing.T) {
+	profiles := []config.SavedProfile{
+		{ID: "one", Profile: config.Profile{DriveLetter: "X"}},
+		{ID: "two", Profile: config.Profile{DriveLetter: "Y"}},
+	}
+	letters := availableDriveLetters(profiles, 0, driveLetterMask("C")|driveLetterMask("X")|driveLetterMask("Z"))
+	joined := strings.Join(letters, "")
+	if strings.Contains(joined, "C") || strings.Contains(joined, "Y") || strings.Contains(joined, "Z") {
+		t.Fatalf("unavailable letters included: %s", joined)
+	}
+	if !strings.Contains(joined, "X") {
+		t.Fatalf("current profile letter missing: %s", joined)
+	}
+}
+
+func TestValidateDriveAssignment(t *testing.T) {
+	profiles := []config.SavedProfile{
+		{ID: "one", Profile: config.Profile{DriveLetter: "X"}},
+		{ID: "two", Profile: config.Profile{DriveLetter: "Y"}},
+	}
+	if err := validateDriveAssignment("X", "one", profiles, 0); err != nil {
+		t.Fatalf("current letter rejected: %v", err)
+	}
+	if err := validateDriveAssignment("Y", "one", profiles, 0); err == nil {
+		t.Fatal("duplicate profile letter accepted")
+	}
+	if err := validateDriveAssignment("Z", "one", profiles, driveLetterMask("Z")); err == nil {
+		t.Fatal("Windows-used letter accepted")
+	}
+}
+
 func TestAllowProfileChange(t *testing.T) {
 	tests := []struct {
 		name       string

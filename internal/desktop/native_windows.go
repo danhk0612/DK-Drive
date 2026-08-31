@@ -27,6 +27,7 @@ const (
 	bmSetCheck    = 0xf1
 	cbAddString   = 0x143
 	cbGetCurSel   = 0x147
+	cbReset       = 0x14b
 	cbSetCurSel   = 0x14e
 	lbReset       = 0x184
 	lbAddString   = 0x180

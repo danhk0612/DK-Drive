@@ -35,6 +35,7 @@ const (
 	idStartup
 	idProtocol
 	idTestConnection
+	idDrive
 )
 
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
@@ -281,7 +282,7 @@ func (w *window) build() error {
 	label("연결 이름", 290, 42, 110)
 	w.name = edit("", 410, 40, 280, false)
 	label("드라이브", 710, 42, 80)
-	w.drive = edit("X", 800, 40, 100, false)
+	w.drive = add("COMBOBOX", "", 0x10000|0x200000|3, 800, 40, 100, 400, idDrive)
 	label("프로토콜", 290, 76, 110)
 	w.protocol = add("COMBOBOX", "", 0x10000|0x200000|3, 410, 74, 280, 240, idProtocol)
 	for _, s := range protocols {
@@ -421,6 +422,87 @@ func (w *window) refreshList() {
 	}
 }
 
+func normalizedDriveLetter(value string) string {
+	return strings.ToUpper(strings.TrimSuffix(strings.TrimSpace(value), ":"))
+}
+
+func driveLetterMask(letter string) uint32 {
+	letter = normalizedDriveLetter(letter)
+	if len(letter) != 1 || letter[0] < 'A' || letter[0] > 'Z' {
+		return 0
+	}
+	return 1 << (letter[0] - 'A')
+}
+
+func availableDriveLetters(profiles []config.SavedProfile, selected int, used uint32) []string {
+	reserved := make(map[string]bool, len(profiles))
+	current := ""
+	for i, saved := range profiles {
+		letter := normalizedDriveLetter(saved.Profile.DriveLetter)
+		if i == selected {
+			current = letter
+			continue
+		}
+		reserved[letter] = true
+	}
+	letters := make([]string, 0, 26)
+	for ch := byte('A'); ch <= 'Z'; ch++ {
+		letter := string(ch)
+		if reserved[letter] {
+			continue
+		}
+		if used&driveLetterMask(letter) != 0 && letter != current {
+			continue
+		}
+		letters = append(letters, letter)
+	}
+	return letters
+}
+
+func validateDriveAssignment(letter, currentID string, profiles []config.SavedProfile, used uint32) error {
+	letter = normalizedDriveLetter(letter)
+	for _, saved := range profiles {
+		if saved.ID != currentID && normalizedDriveLetter(saved.Profile.DriveLetter) == letter {
+			return fmt.Errorf("드라이브 %s:는 다른 연결 프로필에서 사용 중입니다", letter)
+		}
+	}
+	if used&driveLetterMask(letter) != 0 {
+		return fmt.Errorf("드라이브 %s:는 Windows에서 이미 사용 중입니다", letter)
+	}
+	return nil
+}
+
+func (w *window) refreshDriveOptions(current string) {
+	used, err := windows.GetLogicalDrives()
+	if err != nil {
+		used = 0
+	}
+	letters := availableDriveLetters(w.settings.Profiles, w.selected, used)
+	current = normalizedDriveLetter(current)
+	send(w.drive, cbReset, 0, 0)
+	selected := -1
+	for i, letter := range letters {
+		sendText(w.drive, cbAddString, letter)
+		if letter == current {
+			selected = i
+		}
+	}
+	if selected < 0 {
+		for i, letter := range letters {
+			if letter == "X" {
+				selected = i
+				break
+			}
+		}
+	}
+	if selected < 0 && len(letters) != 0 {
+		selected = 0
+	}
+	if selected >= 0 {
+		send(w.drive, cbSetCurSel, uintptr(selected), 0)
+	}
+}
+
 func (w *window) newProfile() {
 	w.loading = true
 	defer func() { w.loading = false }()
@@ -430,7 +512,7 @@ func (w *window) newProfile() {
 	for _, h := range []uintptr{w.name, w.host, w.user, w.volume, w.key, w.knownHosts, w.password, w.passphrase} {
 		setText(h, "")
 	}
-	setText(w.drive, "X")
+	w.refreshDriveOptions("X")
 	setText(w.port, "22")
 	setText(w.root, "/")
 	send(w.protocol, cbSetCurSel, 0, 0)
@@ -488,10 +570,11 @@ func (w *window) loadEditor(index int) {
 	send(w.list, lbSetCurSel, uintptr(index), 0)
 	p := w.settings.Profiles[index]
 	v := p.Profile
+	w.refreshDriveOptions(v.DriveLetter)
 	for _, f := range []struct {
 		h uintptr
 		s string
-	}{{w.name, v.Name}, {w.drive, v.DriveLetter}, {w.port, strconv.Itoa(int(v.Port))}, {w.host, v.Host}, {w.root, v.RemotePath}, {w.user, v.Username}, {w.volume, v.VolumeName}, {w.key, v.PrivateKey}, {w.knownHosts, v.KnownHosts}} {
+	}{{w.name, v.Name}, {w.port, strconv.Itoa(int(v.Port))}, {w.host, v.Host}, {w.root, v.RemotePath}, {w.user, v.Username}, {w.volume, v.VolumeName}, {w.key, v.PrivateKey}, {w.knownHosts, v.KnownHosts}} {
 		setText(f.h, f.s)
 	}
 	send(w.protocol, cbSetCurSel, uintptr(protocolIndex(v)), 0)
@@ -516,7 +599,7 @@ func (w *window) readEditor() (config.Profile, config.Secrets, error) {
 	if err != nil || port == 0 {
 		return config.Profile{}, config.Secrets{}, errors.New("포트는 1~65535여야 합니다")
 	}
-	p := config.Profile{Name: strings.TrimSpace(getText(w.name)), DriveLetter: strings.ToUpper(strings.TrimSuffix(strings.TrimSpace(getText(w.drive)), ":")), Port: uint16(port), Host: strings.TrimSpace(getText(w.host)), RemotePath: getText(w.root), Username: getText(w.user), VolumeName: getText(w.volume), ReadOnly: checked(w.readOnly), AutoConnect: checked(w.autoConnect), AutoReconnect: true, AuthMethod: config.AuthPassword, InsecureSkipTLSVerify: checked(w.insecure)}
+	p := config.Profile{Name: strings.TrimSpace(getText(w.name)), DriveLetter: normalizedDriveLetter(getText(w.drive)), Port: uint16(port), Host: strings.TrimSpace(getText(w.host)), RemotePath: getText(w.root), Username: getText(w.user), VolumeName: getText(w.volume), ReadOnly: checked(w.readOnly), AutoConnect: checked(w.autoConnect), AutoReconnect: true, AuthMethod: config.AuthPassword, InsecureSkipTLSVerify: checked(w.insecure)}
 	switch int(send(w.protocol, cbGetCurSel, 0, 0)) {
 	case 0:
 		p.Protocol = config.ProtocolSFTP
@@ -555,6 +638,23 @@ func (w *window) save() bool {
 		w.report(err)
 		return false
 	}
+	currentID := ""
+	if w.selected >= 0 {
+		currentID = w.settings.Profiles[w.selected].ID
+		if w.manager.State(currentID) != "연결 안 됨" {
+			w.report(errors.New("설정 변경 전에 연결을 해제하세요"))
+			return false
+		}
+	}
+	used, driveErr := windows.GetLogicalDrives()
+	if driveErr != nil {
+		w.report(fmt.Errorf("Windows 드라이브 문자 확인 실패: %w", driveErr))
+		return false
+	}
+	if err := validateDriveAssignment(p.DriveLetter, currentID, w.settings.Profiles, used); err != nil {
+		w.report(err)
+		return false
+	}
 	if p.AutoConnect && !checked(w.remember) && (p.AuthMethod == config.AuthPassword || secret.Passphrase != "") {
 		w.report(errors.New("다음 실행 때 자동 연결하려면 비밀번호/Passphrase 저장을 선택하세요"))
 		return false
@@ -572,10 +672,6 @@ func (w *window) save() bool {
 	var saved config.SavedProfile
 	if w.selected >= 0 {
 		saved = w.settings.Profiles[w.selected]
-		if w.manager.State(saved.ID) != "연결 안 됨" {
-			w.report(errors.New("설정 변경 전에 연결을 해제하세요"))
-			return false
-		}
 	} else {
 		saved.ID, err = config.NewID()
 		if err != nil {
@@ -646,6 +742,15 @@ func (w *window) connect(index int) {
 		return
 	}
 	p := w.settings.Profiles[index]
+	used, driveErr := windows.GetLogicalDrives()
+	if driveErr != nil {
+		w.report(fmt.Errorf("Windows 드라이브 문자 확인 실패: %w", driveErr))
+		return
+	}
+	if err := validateDriveAssignment(p.Profile.DriveLetter, p.ID, w.settings.Profiles, used); err != nil {
+		w.report(err)
+		return
+	}
 	s, err := w.secrets(p)
 	if err != nil {
 		w.report(err)
@@ -667,6 +772,15 @@ func (w *window) connectAll(auto bool) {
 				continue
 			}
 			if w.manager.State(p.ID) != "연결 안 됨" {
+				continue
+			}
+			used, driveErr := windows.GetLogicalDrives()
+			if driveErr != nil {
+				result = errors.Join(result, fmt.Errorf("%s: Windows 드라이브 문자 확인 실패: %w", p.Profile.Name, driveErr))
+				continue
+			}
+			if driveErr = validateDriveAssignment(p.Profile.DriveLetter, p.ID, profiles, used); driveErr != nil {
+				result = errors.Join(result, fmt.Errorf("%s: %w", p.Profile.Name, driveErr))
 				continue
 			}
 			s, err := w.secrets(p)
@@ -737,7 +851,7 @@ func (w *window) command(id, notice int, control uintptr) {
 		return
 	}
 	if !w.loading && ((id == 0 && w.isProfileInput(control) && (notice == 0 || notice == 0x300)) ||
-		(id == idProtocol && notice == 1)) {
+		((id == idProtocol || id == idDrive) && notice == 1)) {
 		w.markDirty()
 	}
 	if id >= 1000 && id < 1000+len(w.settings.Profiles) {
