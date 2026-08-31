@@ -474,6 +474,9 @@ func (w *window) loadEditor(index int) {
 	w.loading = true
 	defer func() { w.loading = false }()
 	w.selected = index
+	// Saving from the confirmation dialog rebuilds the list and restores the
+	// profile being saved. Re-select the profile the user actually clicked.
+	send(w.list, lbSetCurSel, uintptr(index), 0)
 	p := w.settings.Profiles[index]
 	v := p.Profile
 	for _, f := range []struct {
