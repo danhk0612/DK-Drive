@@ -55,13 +55,13 @@ func TestProtocolControls(t *testing.T) {
 		hasPrivateKey bool
 		want          protocolControlState
 	}{
-		{name: "SFTP password", index: 0, want: protocolControlState{sftp: true}},
+		{name: "SFTP password", index: 0, want: protocolControlState{sftp: true, password: true}},
 		{name: "SFTP private key", index: 0, hasPrivateKey: true, want: protocolControlState{sftp: true, passphrase: true}},
-		{name: "WebDAV HTTPS", index: 1, want: protocolControlState{tls: true}},
-		{name: "WebDAV HTTP", index: 2},
-		{name: "FTP", index: 3},
-		{name: "Explicit FTPS", index: 4, want: protocolControlState{tls: true}},
-		{name: "Implicit FTPS", index: 5, want: protocolControlState{tls: true}},
+		{name: "WebDAV HTTPS", index: 1, want: protocolControlState{tls: true, password: true}},
+		{name: "WebDAV HTTP", index: 2, want: protocolControlState{password: true}},
+		{name: "FTP", index: 3, want: protocolControlState{password: true}},
+		{name: "Explicit FTPS", index: 4, want: protocolControlState{tls: true, password: true}},
+		{name: "Implicit FTPS", index: 5, want: protocolControlState{tls: true, password: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

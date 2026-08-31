@@ -413,6 +413,7 @@ func (w *window) setBusy(value bool) {
 type protocolControlState struct {
 	sftp       bool
 	tls        bool
+	password   bool
 	passphrase bool
 }
 
@@ -428,6 +429,7 @@ func protocolControls(index int, hasPrivateKey bool) protocolControlState {
 	return protocolControlState{
 		sftp:       sftp,
 		tls:        index == 1 || index == 4 || index == 5,
+		password:   !sftp || !hasPrivateKey,
 		passphrase: sftp && hasPrivateKey,
 	}
 }
@@ -443,6 +445,7 @@ func (w *window) updateProtocolControls() {
 	for _, h := range []uintptr{w.key, w.knownHosts, w.keyBrowse, w.knownHostsBrowse} {
 		call("EnableWindow", h, enabledWord(state.sftp))
 	}
+	call("EnableWindow", w.password, enabledWord(state.password))
 	call("EnableWindow", w.passphrase, enabledWord(state.passphrase))
 	call("EnableWindow", w.insecure, enabledWord(state.tls))
 }
