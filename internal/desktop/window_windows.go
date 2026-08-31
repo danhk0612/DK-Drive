@@ -51,6 +51,30 @@ type taskResult struct {
 	confirm func() bool
 	answer  chan bool
 }
+
+type layoutRule uint8
+
+const (
+	layoutMoveX layoutRule = 1 << iota
+	layoutMoveY
+	layoutGrowX
+	layoutGrowY
+)
+
+type controlLayout struct {
+	handle uintptr
+	bounds rect
+	rule   layoutRule
+}
+
+type keyboardCommand uint8
+
+const (
+	keyboardNone keyboardCommand = iota
+	keyboardSave
+	keyboardCancelEdit
+)
+
 type window struct {
 	hwnd, font, icon, smallIcon                                                                  uintptr
 	scale                                                                                        float64
@@ -62,7 +86,12 @@ type window struct {
 	sessionSecrets                                                                               map[string]config.Secrets
 	selected                                                                                     int
 	controls                                                                                     []uintptr
-	list, status, closeToTray, startup, saveButton                                               uintptr
+	layout                                                                                       []controlLayout
+	baseClientWidth, baseClientHeight, minTrackWidth, minTrackHeight                             int32
+	list, status, closeToTray, startup, newButton, saveButton                                    uintptr
+	testButton                                                                                   uintptr
+	authHint                                                                                     uintptr
+	exitButton                                                                                   uintptr
 	deleteButton, connectButton, disconnectButton, connectAllButton, disconnectAllButton         uintptr
 	name, protocol, drive, port, host, root, user, volume, key, knownHosts, password, passphrase uintptr
 	keyBrowse, knownHostsBrowse, passwordToggle, passphraseToggle                                uintptr
@@ -105,17 +134,16 @@ func Run(hidden bool) error {
 	defer func() { active = nil }()
 	call("SetProcessDPIAware")
 	w.scale = 1
+	dpi := uintptr(96)
 	if dpiProc := user32.NewProc("GetDpiForSystem"); dpiProc.Find() == nil {
-		dpi, _, _ := dpiProc.Call()
-		if dpi != 0 {
-			w.scale = float64(dpi) / 96
+		value, _, _ := dpiProc.Call()
+		if value != 0 {
+			dpi = value
 		}
 	}
 	var area rect
 	call("SystemParametersInfoW", 0x30, 0, uintptr(unsafe.Pointer(&area)), 0)
-	if area.Right > area.Left && area.Bottom > area.Top {
-		w.scale = min(w.scale, float64(area.Right-area.Left-24)/1150, float64(area.Bottom-area.Top-24)/680)
-	}
+	w.scale = desktopScale(uint32(dpi), area.Right-area.Left, area.Bottom-area.Top)
 	var instance windows.Handle
 	err = windows.GetModuleHandleEx(0, nil, &instance)
 	if err != nil {
@@ -143,6 +171,11 @@ func Run(hidden bool) error {
 		return fmt.Errorf("창 생성 실패: %w", createErr)
 	}
 	w.hwnd = h
+	var windowBounds rect
+	if call("GetWindowRect", h, uintptr(unsafe.Pointer(&windowBounds))) != 0 {
+		w.minTrackWidth = windowBounds.Right - windowBounds.Left
+		w.minTrackHeight = windowBounds.Bottom - windowBounds.Top
+	}
 	defer call("DestroyWindow", h)
 	face := utf("맑은 고딕")
 	font, _, _ := gdi32.NewProc("CreateFontW").Call(uintptr(int32(-w.px(15))), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 0, 0, uintptr(unsafe.Pointer(face)))
@@ -162,6 +195,9 @@ func Run(hidden bool) error {
 	}
 	w.refreshList()
 	w.newProfile()
+	if !hidden || !w.hasTray {
+		call("SetFocus", w.name)
+	}
 	call("PostMessageW", h, wmAutoConnect, 0, 0)
 	var msg message
 	for {
@@ -171,6 +207,9 @@ func Run(hidden bool) error {
 		}
 		if r == 0 {
 			break
+		}
+		if w.handleKeyboardMessage(&msg) {
+			continue
 		}
 		if call("IsDialogMessageW", h, uintptr(unsafe.Pointer(&msg))) == 0 {
 			call("TranslateMessage", uintptr(unsafe.Pointer(&msg)))
@@ -182,6 +221,66 @@ func Run(hidden bool) error {
 
 func (w *window) px(v int) int32 { return int32(float64(v) * w.scale) }
 
+func desktopScale(dpi uint32, workWidth, workHeight int32) float64 {
+	scale := float64(dpi) / 96
+	if scale <= 0 {
+		scale = 1
+	}
+	if workWidth > 24 && workHeight > 24 {
+		scale = min(scale, float64(workWidth-24)/1150, float64(workHeight-24)/680)
+	}
+	return max(scale, 0.75)
+}
+
+func layoutRuleFor(class string, x, y, width, id int) layoutRule {
+	if id == idList {
+		return layoutGrowY
+	}
+	if class == "EDIT" && x == 470 && y == 540 {
+		return layoutGrowX | layoutGrowY
+	}
+	var rule layoutRule
+	if x < 470 && y >= 400 {
+		rule |= layoutMoveY
+	}
+	if x >= 890 {
+		rule |= layoutMoveX
+	}
+	if x == 590 || (x == 470 && width >= 440) || (x == 680 && width >= 370) {
+		rule |= layoutGrowX
+	}
+	return rule
+}
+
+func resizeBounds(bounds rect, rule layoutRule, deltaX, deltaY int32) rect {
+	result := bounds
+	if rule&layoutMoveX != 0 {
+		result.Left += deltaX
+		result.Right += deltaX
+	}
+	if rule&layoutMoveY != 0 {
+		result.Top += deltaY
+		result.Bottom += deltaY
+	}
+	if rule&layoutGrowX != 0 {
+		result.Right += deltaX
+	}
+	if rule&layoutGrowY != 0 {
+		result.Bottom += deltaY
+	}
+	return result
+}
+
+func keyboardCommandFor(key uintptr, controlDown, dirty bool) keyboardCommand {
+	if dirty && controlDown && key == 'S' {
+		return keyboardSave
+	}
+	if dirty && key == 0x1b { // VK_ESCAPE
+		return keyboardCancelEdit
+	}
+	return keyboardNone
+}
+
 func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 	w := active
 	if w != nil {
@@ -191,6 +290,16 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 			return 0
 		case wmNotify:
 			if w.handleListNotification(lp) {
+				return 0
+			}
+		case wmSize:
+			w.resize(int32(lp&0xffff), int32((lp>>16)&0xffff))
+			return 0
+		case wmGetMinMaxInfo:
+			if lp != 0 && w.minTrackWidth > 0 && w.minTrackHeight > 0 {
+				pointer := *(*unsafe.Pointer)(unsafe.Pointer(&lp))
+				limits := (*minMaxInfo)(pointer)
+				limits.MinTrackSize = point{X: w.minTrackWidth, Y: w.minTrackHeight}
 				return 0
 			}
 		case wmClose:
@@ -261,6 +370,13 @@ func (w *window) build() error {
 		}
 		var h uintptr
 		h, err = w.createControl(class, text, style, x, y, ww, hh, id)
+		if h != 0 {
+			w.layout = append(w.layout, controlLayout{
+				handle: h,
+				bounds: rect{Left: w.px(x), Top: w.px(y), Right: w.px(x + ww), Bottom: w.px(y + hh)},
+				rule:   layoutRuleFor(class, x, y, ww, id),
+			})
+		}
 		if class != "STATIC" {
 			w.controls = append(w.controls, h)
 		}
@@ -293,7 +409,7 @@ func (w *window) build() error {
 			return errors.New("프로필 목록 열 생성 실패")
 		}
 	}
-	button("새 연결", 16, 400, 130, idNew)
+	w.newButton = button("새 연결", 16, 400, 130, idNew)
 	w.deleteButton = button("삭제", 166, 400, 130, idDelete)
 	w.saveButton = button("저장", 316, 400, 130, idSave)
 	w.connectButton = button("선택 연결", 16, 438, 205, idConnect)
@@ -301,7 +417,7 @@ func (w *window) build() error {
 	w.connectAllButton = button("모두 연결", 16, 476, 205, idConnectAll)
 	w.disconnectAllButton = button("모두 해제", 241, 476, 205, idDisconnectAll)
 	label("연결 설정 — 저장 후 연결하세요", 470, 14, 440)
-	button("연결 테스트", 930, 6, 150, idTestConnection)
+	w.testButton = add("BUTTON", "연결 테스트", 0x10000|bsDefault, 930, 6, 150, 28, idTestConnection)
 	label("연결 이름", 470, 42, 110)
 	w.name = edit("", 590, 40, 280, false)
 	label("드라이브", 890, 42, 80)
@@ -342,12 +458,25 @@ func (w *window) build() error {
 	w.autoConnect = checkbox("프로그램 시작 시 자동 연결", 680, 386, 370, 0)
 	w.remember = checkbox("비밀번호·Passphrase 저장 (현재 Windows 사용자용 암호화)", 470, 416, 620, 0)
 	w.insecure = checkbox("TLS 인증서 검증 건너뛰기 (신뢰할 수 있는 테스트 서버 전용)", 470, 446, 620, 0)
-	label("SFTP 개인키·known_hosts: 전체 경로 입력 (선택)", 470, 481, 620)
+	w.authHint = add("STATIC", "", 0, 470, 481, 620, 22, 0)
 	label("FTP/HTTP는 평문 전송. 강제 해제 시 미저장 데이터가 손실될 수 있습니다.", 470, 505, 620)
 	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 520, 300, idCloseToTray)
 	w.startup = checkbox("Windows 로그인 시 실행", 16, 547, 300, idStartup)
-	button("프로그램 종료", 16, 580, 430, idExit)
+	w.exitButton = button("프로그램 종료", 16, 580, 430, idExit)
 	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 470, 540, 610, 70, 0)
+	w.setTabOrder([]uintptr{
+		w.list, w.newButton, w.name, w.drive, w.protocol, w.port, w.host, w.root, w.user, w.volume,
+		w.key, w.keyBrowse, w.knownHosts, w.knownHostsBrowse,
+		w.password, w.passwordToggle, w.passphrase, w.passphraseToggle,
+		w.readOnly, w.autoConnect, w.remember, w.insecure,
+		w.saveButton, w.testButton, w.deleteButton, w.connectButton, w.disconnectButton,
+		w.connectAllButton, w.disconnectAllButton, w.closeToTray, w.startup, w.exitButton,
+	})
+	var client rect
+	if call("GetClientRect", w.hwnd, uintptr(unsafe.Pointer(&client))) != 0 {
+		w.baseClientWidth = client.Right - client.Left
+		w.baseClientHeight = client.Bottom - client.Top
+	}
 	check(w.closeToTray, w.settings.CloseToTray)
 	enabled, startErr := startupEnabled()
 	if startErr != nil {
@@ -356,6 +485,61 @@ func (w *window) build() error {
 	check(w.startup, enabled)
 	w.clearDirty()
 	return err
+}
+
+func (w *window) resize(width, height int32) {
+	if width <= 0 || height <= 0 || w.baseClientWidth <= 0 || w.baseClientHeight <= 0 {
+		return
+	}
+	deltaX := max(width-w.baseClientWidth, 0)
+	deltaY := max(height-w.baseClientHeight, 0)
+	for _, item := range w.layout {
+		bounds := resizeBounds(item.bounds, item.rule, deltaX, deltaY)
+		call("MoveWindow", item.handle, uintptr(bounds.Left), uintptr(bounds.Top),
+			uintptr(bounds.Right-bounds.Left), uintptr(bounds.Bottom-bounds.Top), 1)
+	}
+}
+
+func (w *window) setTabOrder(handles []uintptr) {
+	var previous uintptr
+	for _, handle := range handles {
+		if handle == 0 {
+			continue
+		}
+		call("SetWindowPos", handle, previous, 0, 0, 0, 0, 0x1|0x2|0x10)
+		previous = handle
+	}
+}
+
+func (w *window) handleKeyboardMessage(msg *message) bool {
+	if msg.ID != wmKeyDown || w.busy {
+		return false
+	}
+	if msg.WParam == 0x1b && (send(w.protocol, cbGetDroppedState, 0, 0) != 0 || send(w.drive, cbGetDroppedState, 0, 0) != 0) {
+		return false
+	}
+	controlDown := int16(call("GetKeyState", 0x11)) < 0 // VK_CONTROL
+	switch keyboardCommandFor(msg.WParam, controlDown, w.dirty) {
+	case keyboardSave:
+		w.save()
+		return true
+	case keyboardCancelEdit:
+		w.cancelEditorChanges()
+		return true
+	default:
+		return false
+	}
+}
+
+func (w *window) cancelEditorChanges() {
+	if !w.dirty || box(w.hwnd, "저장되지 않은 연결 설정 변경을 버릴까요?", 0x134) != 6 {
+		return
+	}
+	if w.selected >= 0 {
+		w.loadEditor(w.selected)
+		return
+	}
+	w.newProfile()
 }
 
 func (w *window) markDirty() {
@@ -463,14 +647,24 @@ func protocolControls(index int, hasPrivateKey bool) protocolControlState {
 	}
 }
 
+func protocolControlHint(index int, hasPrivateKey bool) string {
+	if index != 0 {
+		return "비밀번호 인증 — SFTP 키 입력과 Passphrase는 사용하지 않습니다."
+	}
+	if hasPrivateKey {
+		return "SFTP 개인키 인증 — 비밀번호는 사용하지 않습니다."
+	}
+	return "SFTP 비밀번호 인증 — 개인키를 선택하면 키 인증으로 전환됩니다."
+}
+
 func (w *window) updateProtocolControls() {
 	if w.busy {
 		return
 	}
-	state := protocolControls(
-		int(send(w.protocol, cbGetCurSel, 0, 0)),
-		strings.TrimSpace(getText(w.key)) != "",
-	)
+	index := int(send(w.protocol, cbGetCurSel, 0, 0))
+	hasPrivateKey := strings.TrimSpace(getText(w.key)) != ""
+	state := protocolControls(index, hasPrivateKey)
+	setText(w.authHint, protocolControlHint(index, hasPrivateKey))
 	if !state.password && w.passwordVisible {
 		w.setSecretVisible(w.password, w.passwordToggle, &w.passwordVisible, false)
 	}

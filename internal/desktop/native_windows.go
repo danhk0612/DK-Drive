@@ -20,18 +20,23 @@ var comctl32 = windows.NewLazySystemDLL("comctl32.dll")
 const (
 	wmCommand                   = 0x111
 	wmNotify                    = 0x4e
+	wmSize                      = 0x5
+	wmGetMinMaxInfo             = 0x24
+	wmKeyDown                   = 0x100
 	wmClose                     = 0x10
 	wmDestroy                   = 2
 	wmTaskDone                  = 0x8001
 	wmTray                      = 0x8002
 	wmAutoConnect               = 0x8003
 	bsCheck                     = 3
+	bsDefault                   = 1
 	bmGetCheck                  = 0xf0
 	bmSetCheck                  = 0xf1
 	cbAddString                 = 0x143
 	cbGetCurSel                 = 0x147
 	cbReset                     = 0x14b
 	cbSetCurSel                 = 0x14e
+	cbGetDroppedState           = 0x157
 	lvmFirst                    = 0x1000
 	lvmDeleteAllItems           = lvmFirst + 9
 	lvmEnsureVisible            = lvmFirst + 19
@@ -53,6 +58,9 @@ const (
 
 type point struct{ X, Y int32 }
 type rect struct{ Left, Top, Right, Bottom int32 }
+type minMaxInfo struct {
+	Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize point
+}
 type message struct {
 	Window         uintptr
 	ID             uint32

@@ -35,6 +35,78 @@ func TestNativeLayoutAMD64(t *testing.T) {
 	if unsafe.Sizeof(notifyHeader{}) != 24 || unsafe.Sizeof(notifyListView{}) != 64 {
 		t.Fatalf("list view notification sizes: header=%d item=%d", unsafe.Sizeof(notifyHeader{}), unsafe.Sizeof(notifyListView{}))
 	}
+	if unsafe.Sizeof(minMaxInfo{}) != 40 {
+		t.Fatalf("MINMAXINFO size: %d", unsafe.Sizeof(minMaxInfo{}))
+	}
+}
+
+func TestDesktopScale(t *testing.T) {
+	tests := []struct {
+		name          string
+		dpi           uint32
+		width, height int32
+		want          float64
+	}{
+		{name: "100 percent", dpi: 96, width: 1920, height: 1080, want: 1},
+		{name: "150 percent", dpi: 144, width: 2560, height: 1440, want: 1.5},
+		{name: "200 percent fitted", dpi: 192, width: 1920, height: 1080, want: float64(1056) / 680},
+		{name: "invalid DPI", width: 1920, height: 1080, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := desktopScale(tt.dpi, tt.width, tt.height)
+			if got < tt.want-0.0001 || got > tt.want+0.0001 {
+				t.Fatalf("desktopScale()=%f, want %f", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLayoutRulesAndResize(t *testing.T) {
+	tests := []struct {
+		name                    string
+		class                   string
+		x, y, width, height, id int
+		wantRule                layoutRule
+		wantLeft, wantTop       int32
+		wantRight, wantBottom   int32
+	}{
+		{name: "list grows vertically", class: "SysListView32", x: 16, y: 40, width: 430, height: 348, id: idList, wantRule: layoutGrowY, wantLeft: 16, wantTop: 40, wantRight: 446, wantBottom: 488},
+		{name: "left button follows bottom", class: "BUTTON", x: 16, y: 400, width: 130, height: 28, wantRule: layoutMoveY, wantLeft: 16, wantTop: 500, wantRight: 146, wantBottom: 528},
+		{name: "field grows horizontally", class: "EDIT", x: 590, y: 108, width: 490, height: 24, wantRule: layoutGrowX, wantLeft: 590, wantTop: 108, wantRight: 1180, wantBottom: 132},
+		{name: "right button follows edge", class: "BUTTON", x: 1000, y: 242, width: 80, height: 28, wantRule: layoutMoveX, wantLeft: 1100, wantTop: 242, wantRight: 1180, wantBottom: 270},
+		{name: "status grows both ways", class: "EDIT", x: 470, y: 540, width: 610, height: 70, wantRule: layoutGrowX | layoutGrowY, wantLeft: 470, wantTop: 540, wantRight: 1180, wantBottom: 710},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rule := layoutRuleFor(tt.class, tt.x, tt.y, tt.width, tt.id)
+			if rule != tt.wantRule {
+				t.Fatalf("rule=%d, want %d", rule, tt.wantRule)
+			}
+			bounds := resizeBounds(rect{Left: int32(tt.x), Top: int32(tt.y), Right: int32(tt.x + tt.width), Bottom: int32(tt.y + tt.height)}, rule, 100, 100)
+			if bounds != (rect{Left: tt.wantLeft, Top: tt.wantTop, Right: tt.wantRight, Bottom: tt.wantBottom}) {
+				t.Fatalf("bounds=%+v", bounds)
+			}
+		})
+	}
+}
+
+func TestKeyboardCommand(t *testing.T) {
+	if got := keyboardCommandFor('S', true, true); got != keyboardSave {
+		t.Fatalf("Ctrl+S command: %d", got)
+	}
+	if got := keyboardCommandFor(0x1b, false, true); got != keyboardCancelEdit {
+		t.Fatalf("Escape command: %d", got)
+	}
+	for _, got := range []keyboardCommand{
+		keyboardCommandFor('S', false, true),
+		keyboardCommandFor('S', true, false),
+		keyboardCommandFor(0x1b, false, false),
+	} {
+		if got != keyboardNone {
+			t.Fatalf("unexpected keyboard command: %d", got)
+		}
+	}
 }
 
 func TestStartupCommandQuotesPath(t *testing.T) {
@@ -78,6 +150,18 @@ func TestProtocolControls(t *testing.T) {
 				t.Fatalf("protocolControls() = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestProtocolControlHint(t *testing.T) {
+	if got := protocolControlHint(0, false); !strings.Contains(got, "비밀번호 인증") || !strings.Contains(got, "개인키를 선택") {
+		t.Fatalf("SFTP password hint: %q", got)
+	}
+	if got := protocolControlHint(0, true); !strings.Contains(got, "개인키 인증") || !strings.Contains(got, "비밀번호는 사용하지 않습니다") {
+		t.Fatalf("SFTP private key hint: %q", got)
+	}
+	if got := protocolControlHint(1, false); !strings.Contains(got, "SFTP 키 입력") || !strings.Contains(got, "사용하지 않습니다") {
+		t.Fatalf("non-SFTP hint: %q", got)
 	}
 }
 
