@@ -48,6 +48,30 @@ func TestProtocolDisplayMapping(t *testing.T) {
 	}
 }
 
+func TestProtocolControls(t *testing.T) {
+	tests := []struct {
+		name          string
+		index         int
+		hasPrivateKey bool
+		want          protocolControlState
+	}{
+		{name: "SFTP password", index: 0, want: protocolControlState{sftp: true}},
+		{name: "SFTP private key", index: 0, hasPrivateKey: true, want: protocolControlState{sftp: true, passphrase: true}},
+		{name: "WebDAV HTTPS", index: 1, want: protocolControlState{tls: true}},
+		{name: "WebDAV HTTP", index: 2},
+		{name: "FTP", index: 3},
+		{name: "Explicit FTPS", index: 4, want: protocolControlState{tls: true}},
+		{name: "Implicit FTPS", index: 5, want: protocolControlState{tls: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := protocolControls(tt.index, tt.hasPrivateKey); got != tt.want {
+				t.Fatalf("protocolControls() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAvailableDriveLetters(t *testing.T) {
 	profiles := []config.SavedProfile{
 		{ID: "one", Profile: config.Profile{DriveLetter: "X"}},

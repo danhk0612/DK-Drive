@@ -62,6 +62,7 @@ type window struct {
 	controls                                                                                     []uintptr
 	list, status, closeToTray, startup, saveButton                                               uintptr
 	name, protocol, drive, port, host, root, user, volume, key, knownHosts, password, passphrase uintptr
+	keyBrowse, knownHostsBrowse                                                                  uintptr
 	readOnly, autoConnect, remember, insecure                                                    uintptr
 	results                                                                                      chan taskResult
 }
@@ -305,10 +306,10 @@ func (w *window) build() error {
 		}
 		*f.target = edit("", 410, y, width, i >= 6)
 		if i == 4 {
-			button("찾아보기…", 820, y-2, 80, idBrowseKey)
+			w.keyBrowse = button("찾아보기…", 820, y-2, 80, idBrowseKey)
 		}
 		if i == 5 {
-			button("찾아보기…", 820, y-2, 80, idBrowseKnownHosts)
+			w.knownHostsBrowse = button("찾아보기…", 820, y-2, 80, idBrowseKnownHosts)
 		}
 	}
 	w.readOnly = checkbox("읽기 전용", 290, 386, 160, 0)
@@ -369,6 +370,7 @@ func (w *window) browsePath(target uintptr, title string, filter []uint16) {
 	}
 	setText(target, path)
 	w.markDirty()
+	w.updateProtocolControls()
 }
 
 func allowProfileChange(dirty bool, choice int, save func() bool) bool {
@@ -403,6 +405,46 @@ func (w *window) setBusy(value bool) {
 		call("EnableWindow", h, enabled)
 	}
 	call("EnableWindow", w.status, 1)
+	if !value {
+		w.updateProtocolControls()
+	}
+}
+
+type protocolControlState struct {
+	sftp       bool
+	tls        bool
+	passphrase bool
+}
+
+func enabledWord(value bool) uintptr {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func protocolControls(index int, hasPrivateKey bool) protocolControlState {
+	sftp := index == 0
+	return protocolControlState{
+		sftp:       sftp,
+		tls:        index == 1 || index == 4 || index == 5,
+		passphrase: sftp && hasPrivateKey,
+	}
+}
+
+func (w *window) updateProtocolControls() {
+	if w.busy {
+		return
+	}
+	state := protocolControls(
+		int(send(w.protocol, cbGetCurSel, 0, 0)),
+		strings.TrimSpace(getText(w.key)) != "",
+	)
+	for _, h := range []uintptr{w.key, w.knownHosts, w.keyBrowse, w.knownHostsBrowse} {
+		call("EnableWindow", h, enabledWord(state.sftp))
+	}
+	call("EnableWindow", w.passphrase, enabledWord(state.passphrase))
+	call("EnableWindow", w.insecure, enabledWord(state.tls))
 }
 
 func (w *window) task(fn func() error, done func(error)) {
@@ -544,6 +586,7 @@ func (w *window) newProfile() {
 	for _, h := range []uintptr{w.readOnly, w.autoConnect, w.remember, w.insecure} {
 		check(h, false)
 	}
+	w.updateProtocolControls()
 	setText(w.status, "새 연결 설정을 입력하세요.")
 	w.clearDirty()
 }
@@ -611,6 +654,7 @@ func (w *window) loadEditor(index int) {
 	w.secretFailed = err != nil
 	setText(w.password, s.Password)
 	setText(w.passphrase, s.Passphrase)
+	w.updateProtocolControls()
 	if err != nil {
 		w.report(err)
 	} else {
@@ -879,6 +923,9 @@ func (w *window) command(id, notice int, control uintptr) {
 		((id == idProtocol || id == idDrive) && notice == 1)) {
 		w.markDirty()
 	}
+	if !w.loading && control == w.key && notice == 0x300 {
+		w.updateProtocolControls()
+	}
 	if id >= 1000 && id < 1000+len(w.settings.Profiles) {
 		i := id - 1000
 		p := w.settings.Profiles[i]
@@ -955,6 +1002,7 @@ func (w *window) command(id, notice int, control uintptr) {
 			if i >= 0 && i < len(ports) {
 				setText(w.port, ports[i])
 				check(w.insecure, false)
+				w.updateProtocolControls()
 			}
 		}
 	case idCloseToTray:
