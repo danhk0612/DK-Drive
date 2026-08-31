@@ -15,25 +15,40 @@ var user32 = windows.NewLazySystemDLL("user32.dll")
 var shell32 = windows.NewLazySystemDLL("shell32.dll")
 var gdi32 = windows.NewLazySystemDLL("gdi32.dll")
 var comdlg32 = windows.NewLazySystemDLL("comdlg32.dll")
+var comctl32 = windows.NewLazySystemDLL("comctl32.dll")
 
 const (
-	wmCommand     = 0x111
-	wmClose       = 0x10
-	wmDestroy     = 2
-	wmTaskDone    = 0x8001
-	wmTray        = 0x8002
-	wmAutoConnect = 0x8003
-	bsCheck       = 3
-	bmGetCheck    = 0xf0
-	bmSetCheck    = 0xf1
-	cbAddString   = 0x143
-	cbGetCurSel   = 0x147
-	cbReset       = 0x14b
-	cbSetCurSel   = 0x14e
-	lbReset       = 0x184
-	lbAddString   = 0x180
-	lbGetCurSel   = 0x188
-	lbSetCurSel   = 0x186
+	wmCommand                   = 0x111
+	wmNotify                    = 0x4e
+	wmClose                     = 0x10
+	wmDestroy                   = 2
+	wmTaskDone                  = 0x8001
+	wmTray                      = 0x8002
+	wmAutoConnect               = 0x8003
+	bsCheck                     = 3
+	bmGetCheck                  = 0xf0
+	bmSetCheck                  = 0xf1
+	cbAddString                 = 0x143
+	cbGetCurSel                 = 0x147
+	cbReset                     = 0x14b
+	cbSetCurSel                 = 0x14e
+	lvmFirst                    = 0x1000
+	lvmDeleteAllItems           = lvmFirst + 9
+	lvmEnsureVisible            = lvmFirst + 19
+	lvmSetItemState             = lvmFirst + 43
+	lvmSetExtendedListViewStyle = lvmFirst + 54
+	lvmInsertItemW              = lvmFirst + 77
+	lvmInsertColumnW            = lvmFirst + 97
+	lvmSetItemTextW             = lvmFirst + 116
+	lvcfFormat                  = 0x1
+	lvcfWidth                   = 0x2
+	lvcfText                    = 0x4
+	lvcfSubItem                 = 0x8
+	lvifText                    = 0x1
+	lvifState                   = 0x8
+	lvisFocused                 = 0x1
+	lvisSelected                = 0x2
+	lvnItemChanged              = -101
 )
 
 type point struct{ X, Y int32 }
@@ -93,6 +108,43 @@ type openFileName struct {
 	ReservedFlags    uint32
 	FlagsEx          uint32
 }
+type initCommonControls struct {
+	Size    uint32
+	Classes uint32
+}
+type listViewColumn struct {
+	Mask                               uint32
+	Format, Width                      int32
+	Text                               *uint16
+	TextMax, SubItem, Image, Order     int32
+	MinWidth, DefaultWidth, IdealWidth int32
+}
+type listViewItem struct {
+	Mask             uint32
+	Item, SubItem    int32
+	State, StateMask uint32
+	Text             *uint16
+	TextMax, Image   int32
+	Param            uintptr
+	Indent, GroupID  int32
+	Columns          uint32
+	ColumnIndices    *uint32
+	ColumnFormats    *int32
+	Group            int32
+}
+type notifyHeader struct {
+	WindowFrom uintptr
+	IDFrom     uintptr
+	Code       int32
+}
+type notifyListView struct {
+	Header             notifyHeader
+	Item, SubItem      int32
+	NewState, OldState uint32
+	Changed            uint32
+	Action             point
+	Param              uintptr
+}
 
 // Pointer-valued Win32 arguments must escape before this Go wrapper can grow
 // the stack; KeepAlive alone would not prevent stack relocation.
@@ -125,6 +177,63 @@ func sendText(h uintptr, msg uint32, s string) uintptr {
 	runtime.KeepAlive(p)
 	return r
 }
+
+func initializeListView() bool {
+	value := initCommonControls{Size: uint32(unsafe.Sizeof(initCommonControls{})), Classes: 0x1}
+	r, _, _ := comctl32.NewProc("InitCommonControlsEx").Call(uintptr(unsafe.Pointer(&value)))
+	runtime.KeepAlive(value)
+	return r != 0
+}
+
+func listViewAddColumn(h uintptr, index, width int, title string) bool {
+	text := windows.StringToUTF16(title)
+	column := listViewColumn{
+		Mask:    lvcfFormat | lvcfWidth | lvcfText | lvcfSubItem,
+		Width:   int32(width),
+		Text:    &text[0],
+		TextMax: int32(len(text)),
+		SubItem: int32(index),
+	}
+	r := send(h, lvmInsertColumnW, uintptr(index), uintptr(unsafe.Pointer(&column)))
+	runtime.KeepAlive(column)
+	runtime.KeepAlive(text)
+	return int32(r) != -1
+}
+
+func listViewAddRow(h uintptr, index int, values []string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	text := windows.StringToUTF16(values[0])
+	item := listViewItem{Mask: lvifText, Item: int32(index), Text: &text[0], TextMax: int32(len(text))}
+	if int32(send(h, lvmInsertItemW, 0, uintptr(unsafe.Pointer(&item)))) == -1 {
+		return false
+	}
+	runtime.KeepAlive(item)
+	runtime.KeepAlive(text)
+	for subItem, value := range values[1:] {
+		text = windows.StringToUTF16(value)
+		item = listViewItem{SubItem: int32(subItem + 1), Text: &text[0], TextMax: int32(len(text))}
+		if send(h, lvmSetItemTextW, uintptr(index), uintptr(unsafe.Pointer(&item))) == 0 {
+			return false
+		}
+		runtime.KeepAlive(item)
+		runtime.KeepAlive(text)
+	}
+	return true
+}
+
+func listViewSelect(h uintptr, index int) {
+	item := listViewItem{StateMask: lvisFocused | lvisSelected}
+	send(h, lvmSetItemState, ^uintptr(0), uintptr(unsafe.Pointer(&item)))
+	if index >= 0 {
+		item.State = lvisFocused | lvisSelected
+		send(h, lvmSetItemState, uintptr(index), uintptr(unsafe.Pointer(&item)))
+		send(h, lvmEnsureVisible, uintptr(index), 0)
+	}
+	runtime.KeepAlive(item)
+}
+
 func checked(h uintptr) bool { return send(h, bmGetCheck, 0, 0) == 1 }
 func check(h uintptr, value bool) {
 	var v uintptr

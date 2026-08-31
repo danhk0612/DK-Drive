@@ -26,6 +26,15 @@ func TestNativeLayoutAMD64(t *testing.T) {
 	if unsafe.Sizeof(openFileName{}) != 152 {
 		t.Fatalf("OPENFILENAMEW size: %d", unsafe.Sizeof(openFileName{}))
 	}
+	if unsafe.Sizeof(listViewColumn{}) != 56 {
+		t.Fatalf("LVCOLUMNW size: %d", unsafe.Sizeof(listViewColumn{}))
+	}
+	if unsafe.Sizeof(listViewItem{}) != 88 {
+		t.Fatalf("LVITEMW size: %d", unsafe.Sizeof(listViewItem{}))
+	}
+	if unsafe.Sizeof(notifyHeader{}) != 24 || unsafe.Sizeof(notifyListView{}) != 64 {
+		t.Fatalf("list view notification sizes: header=%d item=%d", unsafe.Sizeof(notifyHeader{}), unsafe.Sizeof(notifyListView{}))
+	}
 }
 
 func TestStartupCommandQuotesPath(t *testing.T) {
@@ -67,6 +76,55 @@ func TestProtocolControls(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := protocolControls(tt.index, tt.hasPrivateKey); got != tt.want {
 				t.Fatalf("protocolControls() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProfileListRows(t *testing.T) {
+	profiles := []config.SavedProfile{
+		{ID: "sftp", Profile: config.Profile{DriveLetter: "x", Name: "긴 한글 연결 이름", Protocol: config.ProtocolSFTP}},
+		{ID: "webdav", Profile: config.Profile{DriveLetter: "Y", Name: "Web", Protocol: config.ProtocolWebDAV, WebDAVScheme: "http"}},
+		{ID: "webdavs", Profile: config.Profile{DriveLetter: "Z", Name: "Web TLS", Protocol: config.ProtocolWebDAV}},
+		{ID: "ftp", Profile: config.Profile{DriveLetter: "M", Name: "FTP", Protocol: config.ProtocolFTP}},
+		{ID: "ftps", Profile: config.Profile{DriveLetter: "N", Name: "FTPS", Protocol: config.ProtocolFTPS}},
+		{ID: "iftps", Profile: config.Profile{DriveLetter: "P", Name: "Implicit", Protocol: config.ProtocolFTPS, FTPSMode: "implicit-ftps"}},
+	}
+	rows := profileListRows(profiles, func(id string) string {
+		if id == "sftp" {
+			return "연결됨"
+		}
+		return "연결 안 됨"
+	})
+	if len(rows) != 6 {
+		t.Fatalf("row count: %d", len(rows))
+	}
+	if rows[0] != (profileListRow{drive: "X:", name: "긴 한글 연결 이름", protocol: "SFTP", state: "연결됨"}) {
+		t.Fatalf("SFTP row: %+v", rows[0])
+	}
+	if rows[1].protocol != "WebDAV HTTP" || rows[2].protocol != "WebDAV HTTPS" ||
+		rows[3].protocol != "FTP" || rows[4].protocol != "Explicit FTPS" || rows[5].protocol != "Implicit FTPS" {
+		t.Fatalf("protocol names: %+v", rows)
+	}
+}
+
+func TestProfileButtons(t *testing.T) {
+	tests := []struct {
+		name     string
+		selected int
+		dirty    bool
+		states   []string
+		want     profileButtonState
+	}{
+		{name: "new dirty profile", selected: -1, dirty: true, want: profileButtonState{save: true}},
+		{name: "disconnected selection", selected: 0, states: []string{"연결 안 됨"}, want: profileButtonState{delete: true, connect: true, connectAll: true}},
+		{name: "connected selection", selected: 0, states: []string{"연결됨"}, want: profileButtonState{disconnect: true, disconnectAll: true}},
+		{name: "mixed profiles", selected: 1, dirty: true, states: []string{"연결됨", "연결 안 됨"}, want: profileButtonState{save: true, delete: true, connect: true, connectAll: true, disconnectAll: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := profileButtons(tt.selected, tt.dirty, tt.states); got != tt.want {
+				t.Fatalf("profileButtons() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

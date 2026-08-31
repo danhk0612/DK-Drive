@@ -61,6 +61,7 @@ type window struct {
 	selected                                                                                     int
 	controls                                                                                     []uintptr
 	list, status, closeToTray, startup, saveButton                                               uintptr
+	deleteButton, connectButton, disconnectButton, connectAllButton, disconnectAllButton         uintptr
 	name, protocol, drive, port, host, root, user, volume, key, knownHosts, password, passphrase uintptr
 	keyBrowse, knownHostsBrowse                                                                  uintptr
 	readOnly, autoConnect, remember, insecure                                                    uintptr
@@ -110,7 +111,7 @@ func Run(hidden bool) error {
 	var area rect
 	call("SystemParametersInfoW", 0x30, 0, uintptr(unsafe.Pointer(&area)), 0)
 	if area.Right > area.Left && area.Bottom > area.Top {
-		w.scale = min(w.scale, float64(area.Right-area.Left-24)/960, float64(area.Bottom-area.Top-24)/680)
+		w.scale = min(w.scale, float64(area.Right-area.Left-24)/1150, float64(area.Bottom-area.Top-24)/680)
 	}
 	var instance windows.Handle
 	err = windows.GetModuleHandleEx(0, nil, &instance)
@@ -133,7 +134,7 @@ func Run(hidden bool) error {
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(class.Name)), uintptr(instance))
 	title := utf("DKDrive " + app.Version + " — 연결 관리")
-	h, _, createErr := user32.NewProc("CreateWindowExW").Call(0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)), 0x00ca0000, 0x80000000, 0x80000000, uintptr(w.px(960)), uintptr(w.px(680)), 0, 0, uintptr(instance), 0)
+	h, _, createErr := user32.NewProc("CreateWindowExW").Call(0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)), 0x00ca0000, 0x80000000, 0x80000000, uintptr(w.px(1150)), uintptr(w.px(680)), 0, 0, uintptr(instance), 0)
 	runtime.KeepAlive(title)
 	if h == 0 {
 		return fmt.Errorf("창 생성 실패: %w", createErr)
@@ -185,6 +186,10 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 		case wmCommand:
 			w.command(int(wp&0xffff), int(wp>>16), lp)
 			return 0
+		case wmNotify:
+			if w.handleListNotification(lp) {
+				return 0
+			}
 		case wmClose:
 			if w.busy {
 				alert(h, "연결 작업이 끝난 뒤 다시 시도하세요")
@@ -243,6 +248,9 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 func (w *window) build() error {
 	w.loading = true
 	defer func() { w.loading = false }()
+	if !initializeListView() {
+		return errors.New("Windows 목록 보기 초기화 실패")
+	}
 	var err error
 	add := func(class, text string, style uintptr, x, y, ww, hh, id int) uintptr {
 		if err != nil {
@@ -272,56 +280,65 @@ func (w *window) build() error {
 		return add("BUTTON", text, 0x10000|bsCheck, x, y, ww, 25, id)
 	}
 	label("등록된 연결", 16, 14, 240)
-	w.list = add("LISTBOX", "", 0x10000|0x800000|0x200000|1, 16, 40, 250, 348, idList)
-	button("새 연결", 16, 400, 78, idNew)
-	button("삭제", 102, 400, 78, idDelete)
-	w.saveButton = button("저장", 188, 400, 78, idSave)
-	button("선택 연결", 16, 438, 120, idConnect)
-	button("선택 해제", 146, 438, 120, idDisconnect)
-	button("모두 연결", 16, 476, 120, idConnectAll)
-	button("모두 해제", 146, 476, 120, idDisconnectAll)
-	label("연결 설정 — 저장 후 연결하세요", 290, 14, 440)
-	button("연결 테스트", 750, 6, 150, idTestConnection)
-	label("연결 이름", 290, 42, 110)
-	w.name = edit("", 410, 40, 280, false)
-	label("드라이브", 710, 42, 80)
-	w.drive = add("COMBOBOX", "", 0x10000|0x200000|3, 800, 40, 100, 400, idDrive)
-	label("프로토콜", 290, 76, 110)
-	w.protocol = add("COMBOBOX", "", 0x10000|0x200000|3, 410, 74, 280, 240, idProtocol)
+	w.list = add("SysListView32", "", 0x10000|0x800000|0x0001|0x0004|0x0008, 16, 40, 430, 348, idList)
+	send(w.list, lvmSetExtendedListViewStyle, 0, 0x1|0x20|0x10000)
+	for i, column := range []struct {
+		title string
+		width int
+	}{{"드라이브", 58}, {"연결 이름", 165}, {"프로토콜", 105}, {"상태", 98}} {
+		if !listViewAddColumn(w.list, i, int(w.px(column.width)), column.title) {
+			return errors.New("프로필 목록 열 생성 실패")
+		}
+	}
+	button("새 연결", 16, 400, 130, idNew)
+	w.deleteButton = button("삭제", 166, 400, 130, idDelete)
+	w.saveButton = button("저장", 316, 400, 130, idSave)
+	w.connectButton = button("선택 연결", 16, 438, 205, idConnect)
+	w.disconnectButton = button("선택 해제", 241, 438, 205, idDisconnect)
+	w.connectAllButton = button("모두 연결", 16, 476, 205, idConnectAll)
+	w.disconnectAllButton = button("모두 해제", 241, 476, 205, idDisconnectAll)
+	label("연결 설정 — 저장 후 연결하세요", 470, 14, 440)
+	button("연결 테스트", 930, 6, 150, idTestConnection)
+	label("연결 이름", 470, 42, 110)
+	w.name = edit("", 590, 40, 280, false)
+	label("드라이브", 890, 42, 80)
+	w.drive = add("COMBOBOX", "", 0x10000|0x200000|3, 980, 40, 100, 400, idDrive)
+	label("프로토콜", 470, 76, 110)
+	w.protocol = add("COMBOBOX", "", 0x10000|0x200000|3, 590, 74, 280, 240, idProtocol)
 	for _, s := range protocols {
 		sendText(w.protocol, cbAddString, s)
 	}
-	label("포트", 710, 76, 80)
-	w.port = edit("22", 800, 74, 100, false)
+	label("포트", 890, 76, 80)
+	w.port = edit("22", 980, 74, 100, false)
 	fields := []struct {
 		name   string
 		target *uintptr
 	}{{"호스트", &w.host}, {"원격 시작 경로", &w.root}, {"사용자명", &w.user}, {"볼륨명", &w.volume}, {"SFTP 개인키", &w.key}, {"known_hosts", &w.knownHosts}, {"비밀번호", &w.password}, {"키 Passphrase", &w.passphrase}}
 	for i, f := range fields {
 		y := 108 + i*34
-		label(f.name, 290, y+2, 115)
+		label(f.name, 470, y+2, 115)
 		width := 490
 		if i == 4 || i == 5 {
 			width = 400
 		}
-		*f.target = edit("", 410, y, width, i >= 6)
+		*f.target = edit("", 590, y, width, i >= 6)
 		if i == 4 {
-			w.keyBrowse = button("찾아보기…", 820, y-2, 80, idBrowseKey)
+			w.keyBrowse = button("찾아보기…", 1000, y-2, 80, idBrowseKey)
 		}
 		if i == 5 {
-			w.knownHostsBrowse = button("찾아보기…", 820, y-2, 80, idBrowseKnownHosts)
+			w.knownHostsBrowse = button("찾아보기…", 1000, y-2, 80, idBrowseKnownHosts)
 		}
 	}
-	w.readOnly = checkbox("읽기 전용", 290, 386, 160, 0)
-	w.autoConnect = checkbox("프로그램 시작 시 자동 연결", 500, 386, 370, 0)
-	w.remember = checkbox("비밀번호·Passphrase 저장 (현재 Windows 사용자용 암호화)", 290, 416, 620, 0)
-	w.insecure = checkbox("TLS 인증서 검증 건너뛰기 (신뢰할 수 있는 테스트 서버 전용)", 290, 446, 620, 0)
-	label("SFTP 개인키·known_hosts: 전체 경로 입력 (선택)", 290, 481, 620)
-	label("FTP/HTTP는 평문 전송. 강제 해제 시 미저장 데이터가 손실될 수 있습니다.", 290, 505, 620)
-	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 520, 220, idCloseToTray)
-	w.startup = checkbox("Windows 로그인 시 실행", 16, 547, 240, idStartup)
-	button("프로그램 종료", 16, 580, 250, idExit)
-	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 290, 540, 610, 70, 0)
+	w.readOnly = checkbox("읽기 전용", 470, 386, 160, 0)
+	w.autoConnect = checkbox("프로그램 시작 시 자동 연결", 680, 386, 370, 0)
+	w.remember = checkbox("비밀번호·Passphrase 저장 (현재 Windows 사용자용 암호화)", 470, 416, 620, 0)
+	w.insecure = checkbox("TLS 인증서 검증 건너뛰기 (신뢰할 수 있는 테스트 서버 전용)", 470, 446, 620, 0)
+	label("SFTP 개인키·known_hosts: 전체 경로 입력 (선택)", 470, 481, 620)
+	label("FTP/HTTP는 평문 전송. 강제 해제 시 미저장 데이터가 손실될 수 있습니다.", 470, 505, 620)
+	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 520, 300, idCloseToTray)
+	w.startup = checkbox("Windows 로그인 시 실행", 16, 547, 300, idStartup)
+	button("프로그램 종료", 16, 580, 430, idExit)
+	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 470, 540, 610, 70, 0)
 	check(w.closeToTray, w.settings.CloseToTray)
 	enabled, startErr := startupEnabled()
 	if startErr != nil {
@@ -339,6 +356,7 @@ func (w *window) markDirty() {
 	w.dirty = true
 	setText(w.saveButton, "저장 *")
 	setText(w.status, "저장되지 않은 연결 설정 변경 사항이 있습니다.")
+	w.updateActionButtons()
 }
 
 func (w *window) isProfileInput(h uintptr) bool {
@@ -357,6 +375,7 @@ func (w *window) isProfileInput(h uintptr) bool {
 func (w *window) clearDirty() {
 	w.dirty = false
 	setText(w.saveButton, "저장")
+	w.updateActionButtons()
 }
 
 func (w *window) browsePath(target uintptr, title string, filter []uint16) {
@@ -407,6 +426,7 @@ func (w *window) setBusy(value bool) {
 	call("EnableWindow", w.status, 1)
 	if !value {
 		w.updateProtocolControls()
+		w.updateActionButtons()
 	}
 }
 
@@ -482,13 +502,109 @@ func (w *window) anyConnected() bool {
 	return false
 }
 
+type profileListRow struct {
+	drive, name, protocol, state string
+}
+
+func profileProtocolName(p config.Profile) string {
+	switch p.Protocol {
+	case config.ProtocolSFTP:
+		return "SFTP"
+	case config.ProtocolWebDAV:
+		if p.WebDAVScheme == "http" {
+			return "WebDAV HTTP"
+		}
+		return "WebDAV HTTPS"
+	case config.ProtocolFTP:
+		return "FTP"
+	case config.ProtocolFTPS:
+		if p.FTPSMode == "implicit-ftps" {
+			return "Implicit FTPS"
+		}
+		return "Explicit FTPS"
+	default:
+		return "알 수 없음"
+	}
+}
+
+func profileListRows(profiles []config.SavedProfile, state func(string) string) []profileListRow {
+	rows := make([]profileListRow, 0, len(profiles))
+	for _, saved := range profiles {
+		rows = append(rows, profileListRow{
+			drive:    normalizedDriveLetter(saved.Profile.DriveLetter) + ":",
+			name:     saved.Profile.Name,
+			protocol: profileProtocolName(saved.Profile),
+			state:    state(saved.ID),
+		})
+	}
+	return rows
+}
+
 func (w *window) refreshList() {
-	send(w.list, lbReset, 0, 0)
-	for _, p := range w.settings.Profiles {
-		sendText(w.list, lbAddString, fmt.Sprintf("%s:  %s  [%s]", p.Profile.DriveLetter, p.Profile.Name, w.manager.State(p.ID)))
+	wasLoading := w.loading
+	w.loading = true
+	send(w.list, lvmDeleteAllItems, 0, 0)
+	for i, row := range profileListRows(w.settings.Profiles, w.manager.State) {
+		if !listViewAddRow(w.list, i, []string{row.drive, row.name, row.protocol, row.state}) {
+			setText(w.status, "프로필 목록을 갱신하지 못했습니다.")
+			break
+		}
 	}
 	if w.selected >= 0 && w.selected < len(w.settings.Profiles) {
-		send(w.list, lbSetCurSel, uintptr(w.selected), 0)
+		listViewSelect(w.list, w.selected)
+	} else {
+		listViewSelect(w.list, -1)
+	}
+	w.loading = wasLoading
+	w.updateActionButtons()
+}
+
+type profileButtonState struct {
+	save, delete, connect, disconnect, connectAll, disconnectAll bool
+}
+
+func profileButtons(selected int, dirty bool, states []string) profileButtonState {
+	result := profileButtonState{save: dirty}
+	for _, state := range states {
+		if state == "연결 안 됨" {
+			result.connectAll = true
+		} else {
+			result.disconnectAll = true
+		}
+	}
+	if selected < 0 || selected >= len(states) {
+		return result
+	}
+	if states[selected] == "연결 안 됨" {
+		result.delete = true
+		result.connect = true
+	} else {
+		result.disconnect = true
+	}
+	return result
+}
+
+func (w *window) updateActionButtons() {
+	if w.busy {
+		return
+	}
+	states := make([]string, len(w.settings.Profiles))
+	for i, saved := range w.settings.Profiles {
+		states[i] = w.manager.State(saved.ID)
+	}
+	state := profileButtons(w.selected, w.dirty, states)
+	for _, control := range []struct {
+		handle  uintptr
+		enabled bool
+	}{
+		{w.saveButton, state.save},
+		{w.deleteButton, state.delete},
+		{w.connectButton, state.connect},
+		{w.disconnectButton, state.disconnect},
+		{w.connectAllButton, state.connectAll},
+		{w.disconnectAllButton, state.disconnectAll},
+	} {
+		call("EnableWindow", control.handle, enabledWord(control.enabled))
 	}
 }
 
@@ -578,7 +694,7 @@ func (w *window) newProfile() {
 	defer func() { w.loading = false }()
 	w.selected = -1
 	w.secretFailed = false
-	send(w.list, lbSetCurSel, ^uintptr(0), 0)
+	listViewSelect(w.list, -1)
 	for _, h := range []uintptr{w.name, w.host, w.user, w.volume, w.key, w.knownHosts, w.password, w.passphrase} {
 		setText(h, "")
 	}
@@ -626,11 +742,14 @@ func (w *window) loadEditor(index int) {
 		return
 	}
 	if index != w.selected && !w.confirmProfileChange() {
+		wasLoading := w.loading
+		w.loading = true
 		if w.selected >= 0 {
-			send(w.list, lbSetCurSel, uintptr(w.selected), 0)
+			listViewSelect(w.list, w.selected)
 		} else {
-			send(w.list, lbSetCurSel, ^uintptr(0), 0)
+			listViewSelect(w.list, -1)
 		}
+		w.loading = wasLoading
 		return
 	}
 	w.loading = true
@@ -638,7 +757,7 @@ func (w *window) loadEditor(index int) {
 	w.selected = index
 	// Saving from the confirmation dialog rebuilds the list and restores the
 	// profile being saved. Re-select the profile the user actually clicked.
-	send(w.list, lbSetCurSel, uintptr(index), 0)
+	listViewSelect(w.list, index)
 	p := w.settings.Profiles[index]
 	v := p.Profile
 	w.refreshDriveOptions(v.DriveLetter)
@@ -914,6 +1033,25 @@ func (w *window) disconnect(profiles []config.SavedProfile, exiting bool) {
 	})
 }
 
+func (w *window) handleListNotification(value uintptr) bool {
+	if value == 0 {
+		return false
+	}
+	header := (*notifyHeader)(unsafe.Pointer(value))
+	if header.WindowFrom != w.list || header.Code != lvnItemChanged {
+		return false
+	}
+	if w.loading {
+		return true
+	}
+	notification := (*notifyListView)(unsafe.Pointer(value))
+	if notification.Item >= 0 && notification.Changed&lvifState != 0 &&
+		notification.NewState&lvisSelected != 0 && notification.OldState&lvisSelected == 0 {
+		w.loadEditor(int(notification.Item))
+	}
+	return true
+}
+
 func (w *window) command(id, notice int, control uintptr) {
 	if id == idShow {
 		w.show()
@@ -940,10 +1078,6 @@ func (w *window) command(id, notice int, control uintptr) {
 		return
 	}
 	switch id {
-	case idList:
-		if notice == 1 {
-			w.loadEditor(int(int32(send(w.list, lbGetCurSel, 0, 0))))
-		}
 	case idNew:
 		if w.confirmProfileChange() {
 			w.show()
