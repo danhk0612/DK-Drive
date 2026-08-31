@@ -74,3 +74,23 @@ func TestAllowProfileChange(t *testing.T) {
 		})
 	}
 }
+
+func TestAppIconBits(t *testing.T) {
+	for _, size := range []int{16, 32} {
+		andBits, xorBits := appIconBits(size)
+		if len(andBits) != ((size+15)/16)*2*size {
+			t.Fatalf("%dpx AND mask size: %d", size, len(andBits))
+		}
+		if len(xorBits) != size*size*4 {
+			t.Fatalf("%dpx XOR bitmap size: %d", size, len(xorBits))
+		}
+		if andBits[0]&0x80 == 0 {
+			t.Fatalf("%dpx top-left corner is not transparent", size)
+		}
+		centerRow := size - 1 - size/2
+		center := (centerRow*size + size/2) * 4
+		if xorBits[center+3] != 0xff {
+			t.Fatalf("%dpx center is not opaque", size)
+		}
+	}
+}

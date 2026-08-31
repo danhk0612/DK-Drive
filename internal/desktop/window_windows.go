@@ -47,7 +47,7 @@ type taskResult struct {
 	answer  chan bool
 }
 type window struct {
-	hwnd, font, icon                                                                             uintptr
+	hwnd, font, icon, smallIcon                                                                  uintptr
 	scale                                                                                        float64
 	hasTray, busy, secretFailed, loading, dirty                                                  bool
 	taskbarCreated                                                                               uint32
@@ -113,8 +113,17 @@ func Run(hidden bool) error {
 	if err != nil {
 		return err
 	}
-	w.icon = call("LoadIconW", 0, 32512)
-	class := windowClass{Size: uint32(unsafe.Sizeof(windowClass{})), Proc: syscall.NewCallback(wndProc), Instance: uintptr(instance), Icon: w.icon, SmallIcon: w.icon, Cursor: call("LoadCursorW", 0, 32512), Background: 16, Name: utf(className)}
+	w.icon, err = createAppIcon(uintptr(instance), 32)
+	if err != nil {
+		return err
+	}
+	defer call("DestroyIcon", w.icon)
+	w.smallIcon, err = createAppIcon(uintptr(instance), 16)
+	if err != nil {
+		return err
+	}
+	defer call("DestroyIcon", w.smallIcon)
+	class := windowClass{Size: uint32(unsafe.Sizeof(windowClass{})), Proc: syscall.NewCallback(wndProc), Instance: uintptr(instance), Icon: w.icon, SmallIcon: w.smallIcon, Cursor: call("LoadCursorW", 0, 32512), Background: 16, Name: utf(className)}
 	if call("RegisterClassExW", uintptr(unsafe.Pointer(&class))) == 0 {
 		return errors.New("창 클래스 등록 실패")
 	}

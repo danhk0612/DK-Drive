@@ -115,6 +115,62 @@ func box(h uintptr, text string, flags uintptr) uintptr {
 	return r
 }
 
+func appIconBits(size int) ([]byte, []byte) {
+	andStride := ((size + 15) / 16) * 2
+	andBits := make([]byte, andStride*size)
+	for i := range andBits {
+		andBits[i] = 0xff
+	}
+	xorBits := make([]byte, size*size*4)
+	set := func(x, y int, r, g, b byte) {
+		row := size - 1 - y
+		andBits[row*andStride+x/8] &^= 0x80 >> uint(x%8)
+		i := (row*size + x) * 4
+		xorBits[i], xorBits[i+1], xorBits[i+2], xorBits[i+3] = b, g, r, 0xff
+	}
+	for y := range size {
+		for x := range size {
+			sx, sy := x*32/size, y*32/size
+			cx, cy := min(max(sx, 6), 25), min(max(sy, 6), 25)
+			if (sx-cx)*(sx-cx)+(sy-cy)*(sy-cy) > 16 {
+				continue
+			}
+			r, g, b := byte(18), byte(104), byte(179)
+			if sx <= 3 || sx >= 28 || sy <= 3 || sy >= 28 {
+				r, g, b = 11, 79, 138
+			}
+			set(x, y, r, g, b)
+		}
+	}
+	for y := range size {
+		for x := range size {
+			sx, sy := x*32/size, y*32/size
+			d := (sx >= 8 && sx <= 11 && sy >= 7 && sy <= 23) ||
+				(sx >= 10 && sx <= 19 && sy >= 7 && sy <= 10) ||
+				(sx >= 10 && sx <= 19 && sy >= 20 && sy <= 23) ||
+				(sx >= 19 && sx <= 22 && sy >= 10 && sy <= 20)
+			if d {
+				set(x, y, 255, 255, 255)
+			}
+		}
+	}
+	return andBits, xorBits
+}
+
+func createAppIcon(instance uintptr, size int) (uintptr, error) {
+	andBits, xorBits := appIconBits(size)
+	h, _, err := user32.NewProc("CreateIcon").Call(
+		instance, uintptr(size), uintptr(size), 1, 32,
+		uintptr(unsafe.Pointer(&andBits[0])), uintptr(unsafe.Pointer(&xorBits[0])),
+	)
+	runtime.KeepAlive(andBits)
+	runtime.KeepAlive(xorBits)
+	if h == 0 {
+		return 0, fmt.Errorf("DKDrive 아이콘 생성 실패: %w", err)
+	}
+	return h, nil
+}
+
 const className = "DKDrive.Desktop.0_5"
 
 func (w *window) createControl(class, text string, style uintptr, x, y, width, height int, id int) (uintptr, error) {
