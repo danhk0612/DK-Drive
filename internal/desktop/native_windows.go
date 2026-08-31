@@ -14,6 +14,7 @@ import (
 var user32 = windows.NewLazySystemDLL("user32.dll")
 var shell32 = windows.NewLazySystemDLL("shell32.dll")
 var gdi32 = windows.NewLazySystemDLL("gdi32.dll")
+var comdlg32 = windows.NewLazySystemDLL("comdlg32.dll")
 
 const (
 	wmCommand     = 0x111
@@ -67,6 +68,31 @@ type notifyIcon struct {
 	GUID                windows.GUID
 	BalloonIcon         uintptr
 }
+type openFileName struct {
+	Size             uint32
+	Owner            uintptr
+	Instance         uintptr
+	Filter           *uint16
+	CustomFilter     *uint16
+	MaxCustomFilter  uint32
+	FilterIndex      uint32
+	File             *uint16
+	MaxFile          uint32
+	FileTitle        *uint16
+	MaxFileTitle     uint32
+	InitialDirectory *uint16
+	Title            *uint16
+	Flags            uint32
+	FileOffset       uint16
+	FileExtension    uint16
+	DefaultExtension *uint16
+	CustomData       uintptr
+	Hook             uintptr
+	TemplateName     *uint16
+	Reserved         uintptr
+	ReservedFlags    uint32
+	FlagsEx          uint32
+}
 
 // Pointer-valued Win32 arguments must escape before this Go wrapper can grow
 // the stack; KeepAlive alone would not prevent stack relocation.
@@ -114,6 +140,47 @@ func box(h uintptr, text string, flags uintptr) uintptr {
 	runtime.KeepAlive(p)
 	runtime.KeepAlive(t)
 	return r
+}
+
+func fileDialogFilter(parts ...string) []uint16 {
+	result := make([]uint16, 0)
+	for _, part := range parts {
+		result = append(result, windows.StringToUTF16(part)...)
+	}
+	return append(result, 0)
+}
+
+func chooseFile(owner uintptr, title, current string, filter []uint16) (string, bool, error) {
+	buffer := make([]uint16, 32768)
+	if current != "" {
+		value := windows.StringToUTF16(current)
+		if len(value) < len(buffer) {
+			copy(buffer, value)
+		}
+	}
+	titleText := windows.StringToUTF16(title)
+	dialog := openFileName{
+		Size:        uint32(unsafe.Sizeof(openFileName{})),
+		Owner:       owner,
+		Filter:      &filter[0],
+		FilterIndex: 1,
+		File:        &buffer[0],
+		MaxFile:     uint32(len(buffer)),
+		Title:       &titleText[0],
+		Flags:       0x8 | 0x800 | 0x1000 | 0x80000 | 0x2000000,
+	}
+	result, _, callErr := comdlg32.NewProc("GetOpenFileNameW").Call(uintptr(unsafe.Pointer(&dialog)))
+	runtime.KeepAlive(filter)
+	runtime.KeepAlive(titleText)
+	runtime.KeepAlive(buffer)
+	if result != 0 {
+		return windows.UTF16ToString(buffer), true, nil
+	}
+	code, _, _ := comdlg32.NewProc("CommDlgExtendedError").Call()
+	if code == 0 {
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("Windows 파일 선택 창 오류: 0x%04X: %w", code, callErr)
 }
 
 func appIconBits(size int) ([]byte, []byte) {

@@ -36,6 +36,8 @@ const (
 	idProtocol
 	idTestConnection
 	idDrive
+	idBrowseKey
+	idBrowseKnownHosts
 )
 
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
@@ -297,7 +299,17 @@ func (w *window) build() error {
 	for i, f := range fields {
 		y := 108 + i*34
 		label(f.name, 290, y+2, 115)
-		*f.target = edit("", 410, y, 490, i >= 6)
+		width := 490
+		if i == 4 || i == 5 {
+			width = 400
+		}
+		*f.target = edit("", 410, y, width, i >= 6)
+		if i == 4 {
+			button("찾아보기…", 820, y-2, 80, idBrowseKey)
+		}
+		if i == 5 {
+			button("찾아보기…", 820, y-2, 80, idBrowseKnownHosts)
+		}
 	}
 	w.readOnly = checkbox("읽기 전용", 290, 386, 160, 0)
 	w.autoConnect = checkbox("프로그램 시작 시 자동 연결", 500, 386, 370, 0)
@@ -344,6 +356,19 @@ func (w *window) isProfileInput(h uintptr) bool {
 func (w *window) clearDirty() {
 	w.dirty = false
 	setText(w.saveButton, "저장")
+}
+
+func (w *window) browsePath(target uintptr, title string, filter []uint16) {
+	path, selected, err := chooseFile(w.hwnd, title, strings.TrimSpace(getText(target)), filter)
+	if err != nil {
+		w.report(err)
+		return
+	}
+	if !selected {
+		return
+	}
+	setText(target, path)
+	w.markDirty()
 }
 
 func allowProfileChange(dirty bool, choice int, save func() bool) bool {
@@ -876,6 +901,16 @@ func (w *window) command(id, notice int, control uintptr) {
 		}
 	case idSave:
 		w.save()
+	case idBrowseKey:
+		w.browsePath(w.key, "SFTP 개인키 선택", fileDialogFilter(
+			"개인키 파일 (*.pem;*.key;*.ppk)", "*.pem;*.key;*.ppk",
+			"모든 파일 (*.*)", "*.*",
+		))
+	case idBrowseKnownHosts:
+		w.browsePath(w.knownHosts, "SFTP known_hosts 선택", fileDialogFilter(
+			"known_hosts 파일", "known_hosts*",
+			"모든 파일 (*.*)", "*.*",
+		))
 	case idTestConnection:
 		p, s, err := w.readEditor()
 		if err != nil {

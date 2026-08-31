@@ -23,6 +23,9 @@ func TestNativeLayoutAMD64(t *testing.T) {
 	if unsafe.Sizeof(message{}) != 48 {
 		t.Fatalf("MSG size: %d", unsafe.Sizeof(message{}))
 	}
+	if unsafe.Sizeof(openFileName{}) != 152 {
+		t.Fatalf("OPENFILENAMEW size: %d", unsafe.Sizeof(openFileName{}))
+	}
 }
 
 func TestStartupCommandQuotesPath(t *testing.T) {
@@ -73,6 +76,22 @@ func TestValidateDriveAssignment(t *testing.T) {
 	}
 	if err := validateDriveAssignment("Z", "one", profiles, driveLetterMask("Z")); err == nil {
 		t.Fatal("Windows-used letter accepted")
+	}
+}
+
+func TestFileDialogFilter(t *testing.T) {
+	filter := fileDialogFilter("개인키 파일", "*.key", "모든 파일", "*.*")
+	if len(filter) < 2 || filter[len(filter)-1] != 0 || filter[len(filter)-2] != 0 {
+		t.Fatal("filter is not double-NUL terminated")
+	}
+	parts := 0
+	for _, value := range filter[:len(filter)-1] {
+		if value == 0 {
+			parts++
+		}
+	}
+	if parts != 4 {
+		t.Fatalf("filter part count: %d", parts)
 	}
 }
 
