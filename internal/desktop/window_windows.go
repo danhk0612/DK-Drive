@@ -42,6 +42,7 @@ const (
 	idTogglePassword
 	idTogglePassphrase
 	idRecovery
+	idOpenCacheFolder
 )
 
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
@@ -883,6 +884,10 @@ func normalizedDriveLetter(value string) string {
 	return strings.ToUpper(strings.TrimSuffix(strings.TrimSpace(value), ":"))
 }
 
+func trayProfileLabel(saved config.SavedProfile, state string) string {
+	return fmt.Sprintf("%s: %s — %s", normalizedDriveLetter(saved.Profile.DriveLetter), saved.Profile.Name, state)
+}
+
 func driveLetterMask(letter string) uint32 {
 	letter = normalizedDriveLetter(letter)
 	if len(letter) != 1 || letter[0] < 'A' || letter[0] > 'Z' {
@@ -1433,6 +1438,14 @@ func (w *window) command(id, notice int, control uintptr) {
 		w.disconnect(w.settings.Profiles, false)
 	case idRecovery:
 		if err := showRecoveryDialog(w); err != nil {
+			w.report(err)
+		}
+	case idOpenCacheFolder:
+		store, err := localcache.New("")
+		if err == nil {
+			err = openFolder(store.Directory())
+		}
+		if err != nil {
 			w.report(err)
 		}
 	case idExit:

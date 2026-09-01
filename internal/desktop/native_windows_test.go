@@ -329,3 +329,10 @@ func TestAppIconBits(t *testing.T) {
 		}
 	}
 }
+
+func TestTrayProfileLabel(t *testing.T) {
+	saved := config.SavedProfile{Profile: config.Profile{DriveLetter: "x", Name: "NAS WebDAV"}}
+	if got := trayProfileLabel(saved, "연결됨"); got != "X: NAS WebDAV — 연결됨" {
+		t.Fatalf("tray label: %q", got)
+	}
+}

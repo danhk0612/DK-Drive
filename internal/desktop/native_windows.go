@@ -436,19 +436,38 @@ func (w *window) trayMenu() {
 		return
 	}
 	defer call("DestroyMenu", menu)
-	add := func(id int, text string) {
+	drives := call("CreatePopupMenu")
+	cacheMenu := call("CreatePopupMenu")
+	if drives == 0 || cacheMenu == 0 {
+		if drives != 0 {
+			call("DestroyMenu", drives)
+		}
+		if cacheMenu != 0 {
+			call("DestroyMenu", cacheMenu)
+		}
+		return
+	}
+	add := func(target, flags, id uintptr, text string) {
 		p := utf(text)
-		call("AppendMenuW", menu, 0, uintptr(id), uintptr(unsafe.Pointer(p)))
+		call("AppendMenuW", target, flags, id, uintptr(unsafe.Pointer(p)))
 		runtime.KeepAlive(p)
 	}
-	add(idShow, "창 열기 / 설정")
-	add(idNew, "드라이브 추가")
 	for i, p := range w.settings.Profiles {
-		add(1000+i, fmt.Sprintf("%s: %s — %s", p.Profile.DriveLetter, p.Profile.Name, w.manager.State(p.ID)))
+		add(drives, 0, uintptr(1000+i), trayProfileLabel(p, w.manager.State(p.ID)))
 	}
-	add(idConnectAll, "모든 드라이브 연결")
-	add(idDisconnectAll, "모든 드라이브 해제")
-	add(idExit, "종료")
+	if len(w.settings.Profiles) == 0 {
+		add(drives, 0x1, 0, "(등록된 드라이브 없음)")
+	}
+	add(cacheMenu, 0, idOpenCacheFolder, "캐시 폴더 열기")
+	add(cacheMenu, 0, idRecovery, "캐시 정리")
+
+	add(menu, 0, idShow, "창 열기 / 설정")
+	add(menu, 0x10, drives, "드라이브")
+	add(menu, 0, idNew, "드라이브 추가")
+	add(menu, 0, idConnectAll, "모든 드라이브 연결")
+	add(menu, 0, idDisconnectAll, "모든 드라이브 해제")
+	add(menu, 0x10, cacheMenu, "캐시 관리")
+	add(menu, 0, idExit, "종료")
 	var pos point
 	call("GetCursorPos", uintptr(unsafe.Pointer(&pos)))
 	call("SetForegroundWindow", w.hwnd)
