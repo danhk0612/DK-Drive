@@ -3,14 +3,20 @@
 package desktop
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	localcache "github.com/danhk0612/DK-Drive/internal/cache"
+	"github.com/danhk0612/DK-Drive/internal/config"
+	"github.com/danhk0612/DK-Drive/internal/connection"
+	remoterecovery "github.com/danhk0612/DK-Drive/internal/recovery"
+	"github.com/danhk0612/DK-Drive/internal/vfs"
 	"golang.org/x/sys/windows"
 )
 
@@ -20,8 +26,10 @@ const (
 	idRecoveryRefresh
 	idRecoveryFolder
 	idRecoveryExport
+	idRecoveryRetry
 	idRecoveryDelete
 	idRecoveryClose
+	wmRecoveryDone = 0x8004
 )
 
 var activeRecovery *recoveryDialog
@@ -33,12 +41,24 @@ type recoveryDialog struct {
 	store             *localcache.Store
 	items             []localcache.RecoveryItem
 	selected          int
+	busy              bool
 	list, detail      uintptr
 	refreshButton     uintptr
 	folderButton      uintptr
 	exportButton      uintptr
+	retryButton       uintptr
 	deleteButton      uintptr
 	closeButton       uintptr
+	retryResults      chan recoveryRetryResult
+}
+
+type recoveryRetryResult struct {
+	itemIndex int
+	target    string
+	state     remoterecovery.RemoteState
+	entry     vfs.Entry
+	uploaded  bool
+	err       error
 }
 
 func showRecoveryDialog(owner *window) error {
@@ -46,7 +66,7 @@ func showRecoveryDialog(owner *window) error {
 	if err != nil {
 		return err
 	}
-	dialog := &recoveryDialog{owner: owner.hwnd, font: owner.font, scale: owner.scale, ownerWindow: owner, store: store, selected: -1}
+	dialog := &recoveryDialog{owner: owner.hwnd, font: owner.font, scale: owner.scale, ownerWindow: owner, store: store, selected: -1, retryResults: make(chan recoveryRetryResult, 1)}
 	items, err := store.Scan()
 	if err != nil {
 		return err
@@ -139,7 +159,7 @@ func (dialog *recoveryDialog) build() error {
 		h, err = dialog.createControl(class, text, style, x, y, width, height, id)
 		return h
 	}
-	add("STATIC", "보존된 캐시는 자동 업로드·삭제하지 않습니다. 내용을 확인한 뒤 내보내거나 명시적으로 삭제하세요.", 0, 16, 14, 870, 22, 0)
+	add("STATIC", "보존된 캐시는 자동 업로드·삭제하지 않습니다. 내용을 확인한 뒤 내보내기·원격 재시도·삭제를 선택하세요.", 0, 16, 14, 870, 22, 0)
 	dialog.list = add("SysListView32", "", 0x800000|0x0001|0x0004|0x0008, 16, 42, 870, 330, idRecoveryList)
 	send(dialog.list, lvmSetExtendedListViewStyle, 0, 0x1|0x20|0x10000)
 	columns := []struct {
@@ -155,11 +175,12 @@ func (dialog *recoveryDialog) build() error {
 		}
 	}
 	dialog.detail = add("EDIT", "", 0x800000|0x800|4|0x40, 16, 386, 870, 130, 0)
-	dialog.refreshButton = add("BUTTON", "새로 고침", 0, 16, 532, 110, 30, idRecoveryRefresh)
-	dialog.folderButton = add("BUTTON", "캐시 폴더 열기", 0, 140, 532, 140, 30, idRecoveryFolder)
-	dialog.exportButton = add("BUTTON", "선택 항목 내보내기…", 0, 294, 532, 190, 30, idRecoveryExport)
-	dialog.deleteButton = add("BUTTON", "선택 항목 삭제", 0, 498, 532, 145, 30, idRecoveryDelete)
-	dialog.closeButton = add("BUTTON", "닫기", bsDefault, 756, 532, 130, 30, idRecoveryClose)
+	dialog.refreshButton = add("BUTTON", "새로 고침", 0, 16, 532, 90, 30, idRecoveryRefresh)
+	dialog.folderButton = add("BUTTON", "캐시 폴더 열기", 0, 114, 532, 110, 30, idRecoveryFolder)
+	dialog.exportButton = add("BUTTON", "선택 항목 내보내기…", 0, 232, 532, 150, 30, idRecoveryExport)
+	dialog.retryButton = add("BUTTON", "원격 재시도", 0, 390, 532, 110, 30, idRecoveryRetry)
+	dialog.deleteButton = add("BUTTON", "선택 항목 삭제", 0, 508, 532, 110, 30, idRecoveryDelete)
+	dialog.closeButton = add("BUTTON", "닫기", bsDefault, 798, 532, 90, 30, idRecoveryClose)
 	return err
 }
 
@@ -200,6 +221,7 @@ func (dialog *recoveryDialog) updateDetails() {
 	if dialog.selected < 0 || dialog.selected >= len(dialog.items) {
 		setText(dialog.detail, "보존 캐시 항목이 없습니다.")
 		call("EnableWindow", dialog.exportButton, 0)
+		call("EnableWindow", dialog.retryButton, 0)
 		call("EnableWindow", dialog.deleteButton, 0)
 		return
 	}
@@ -219,7 +241,168 @@ func (dialog *recoveryDialog) updateDetails() {
 	}
 	setText(dialog.detail, strings.Join(lines, "\r\n"))
 	call("EnableWindow", dialog.exportButton, enabledWord(recoveryExportable(item)))
+	call("EnableWindow", dialog.retryButton, enabledWord(dialog.recoveryRetryable(item) && !dialog.busy))
 	call("EnableWindow", dialog.deleteButton, enabledWord(recoveryDeletable(item)))
+}
+
+func (dialog *recoveryDialog) recoveryRetryable(item localcache.RecoveryItem) bool {
+	return item.Metadata.RecoveryState == localcache.StatePreserved && item.Metadata.RemotePath != "" && len(dialog.ownerWindow.settings.Profiles) > 0
+}
+
+func (dialog *recoveryDialog) retryProfile(item localcache.RecoveryItem) (config.SavedProfile, error) {
+	if selected := dialog.ownerWindow.selected; selected >= 0 && selected < len(dialog.ownerWindow.settings.Profiles) {
+		return dialog.ownerWindow.settings.Profiles[selected], nil
+	}
+	for _, profile := range dialog.ownerWindow.settings.Profiles {
+		if profile.ID == item.Metadata.ProfileID {
+			return profile, nil
+		}
+	}
+	return config.SavedProfile{}, errors.New("메인 창에서 원격 재시도에 사용할 연결 프로필을 선택하세요")
+}
+
+func (dialog *recoveryDialog) retrySelected() {
+	if dialog.busy || dialog.selected < 0 || dialog.selected >= len(dialog.items) {
+		return
+	}
+	item := dialog.items[dialog.selected]
+	if !dialog.recoveryRetryable(item) {
+		return
+	}
+	profile, err := dialog.retryProfile(item)
+	if err != nil {
+		alert(dialog.hwnd, err.Error())
+		return
+	}
+	if profile.Profile.ReadOnly {
+		alert(dialog.hwnd, "읽기 전용 프로필로는 보존 캐시를 원격 재시도할 수 없습니다")
+		return
+	}
+	remotePath, err := remoterecovery.RelativePath(profile.Profile.RemotePath, item.Metadata.RemotePath)
+	if err != nil {
+		alert(dialog.hwnd, err.Error())
+		return
+	}
+	secrets, err := dialog.ownerWindow.secrets(profile)
+	if err != nil {
+		alert(dialog.hwnd, err.Error())
+		return
+	}
+	message := "보존 캐시를 원격 서버에 재시도할까요?\n\n프로필: " + profile.Profile.Name +
+		"\n원격 경로: " + item.Metadata.RemotePath + "\n크기: " + formatByteSize(item.Metadata.Size) +
+		"\n\n원격 파일이 있으면 크기와 수정 시각을 비교한 뒤 충돌 여부를 다시 묻습니다."
+	if box(dialog.hwnd, message, 0x134) != 6 {
+		return
+	}
+	dialog.beginRetry(dialog.selected, profile, secrets, remotePath, true)
+}
+
+func (dialog *recoveryDialog) beginRetry(index int, profile config.SavedProfile, secrets config.Secrets, target string, inspect bool) {
+	if dialog.busy || index < 0 || index >= len(dialog.items) {
+		return
+	}
+	dialog.busy = true
+	dialog.updateDetails()
+	call("EnableWindow", dialog.refreshButton, 0)
+	call("EnableWindow", dialog.exportButton, 0)
+	call("EnableWindow", dialog.deleteButton, 0)
+	call("EnableWindow", dialog.closeButton, 0)
+	item := dialog.items[index]
+	go func() {
+		result := recoveryRetryResult{itemIndex: index, target: target}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		backend, err := connection.OpenBackend(ctx, profile.Profile, secrets)
+		if err == nil && inspect {
+			result.state, result.entry, err = remoterecovery.Inspect(ctx, dialog.store, item, backend, target)
+		}
+		if err == nil && (!inspect || result.state == remoterecovery.RemoteMissing) {
+			result.entry, err = remoterecovery.Upload(ctx, dialog.store, item, backend, target)
+			result.uploaded = err == nil
+		}
+		if backend != nil {
+			err = errors.Join(err, backend.Close())
+		}
+		result.err = err
+		dialog.retryResults <- result
+		call("PostMessageW", dialog.hwnd, wmRecoveryDone, 0, 0)
+	}()
+}
+
+func (dialog *recoveryDialog) finishRetry(result recoveryRetryResult) {
+	dialog.busy = false
+	call("EnableWindow", dialog.refreshButton, 1)
+	call("EnableWindow", dialog.closeButton, 1)
+	dialog.updateDetails()
+	if result.err != nil {
+		alert(dialog.hwnd, result.err.Error()+"\n\n원본 캐시와 메타데이터는 그대로 보존했습니다.")
+		return
+	}
+	if result.itemIndex < 0 || result.itemIndex >= len(dialog.items) {
+		dialog.refresh()
+		return
+	}
+	item := dialog.items[result.itemIndex]
+	switch {
+	case result.uploaded:
+		dialog.offerDeleteAfterRetry(item, "원격 전송과 결과 크기 확인을 완료했습니다.")
+	case result.state == remoterecovery.RemoteSame:
+		dialog.offerDeleteAfterRetry(item, "원격 파일의 크기와 수정 시각이 같아 업로드를 생략했습니다.")
+	case result.state == remoterecovery.RemoteConflict:
+		alternate := remoterecovery.AlternatePath(result.target, time.Now())
+		message := "원격 파일이 보존 캐시와 다릅니다.\n\n원격 크기: " + formatByteSize(result.entry.Size) +
+			"\n원격 수정 시각: " + formatRecoveryTime(result.entry.ModTime) +
+			"\n로컬 크기: " + formatByteSize(item.Metadata.Size) +
+			"\n로컬 수정 시각: " + formatRecoveryTime(item.Metadata.UpdatedAt) +
+			"\n\n예: 기존 원격 파일 덮어쓰기\n아니요: 다른 이름으로 전송 (" + alternate + ")\n취소: 건너뛰기"
+		choice := box(dialog.hwnd, message, 0x203)
+		profile, profileErr := dialog.retryProfile(item)
+		if profileErr != nil {
+			alert(dialog.hwnd, profileErr.Error())
+			return
+		}
+		secrets, secretErr := dialog.ownerWindow.secrets(profile)
+		if secretErr != nil {
+			alert(dialog.hwnd, secretErr.Error())
+			return
+		}
+		switch choice {
+		case 6:
+			dialog.beginRetry(result.itemIndex, profile, secrets, result.target, false)
+		case 7:
+			dialog.beginRetry(result.itemIndex, profile, secrets, alternate, true)
+		}
+	}
+}
+
+func (dialog *recoveryDialog) offerDeleteAfterRetry(item localcache.RecoveryItem, result string) {
+	if dialog.ownerWindow.anyConnected() {
+		box(dialog.hwnd, result+"\n\n연결된 드라이브가 있어 보존 캐시는 유지했습니다. 모든 드라이브를 해제한 뒤 선택 삭제할 수 있습니다.", 0x40)
+		dialog.refresh()
+		return
+	}
+	message := result + "\n\n보존 캐시를 지금 삭제할까요?\n아니요를 선택하면 캐시는 계속 남습니다."
+	if box(dialog.hwnd, message, 0x124) == 6 {
+		if err := dialog.store.Delete(item); err != nil {
+			alert(dialog.hwnd, err.Error())
+		}
+	}
+	dialog.refresh()
+}
+
+func (dialog *recoveryDialog) close() {
+	if dialog.busy {
+		box(dialog.hwnd, "원격 재시도가 끝날 때까지 복구 창을 닫을 수 없습니다.", 0x40)
+		return
+	}
+	call("DestroyWindow", dialog.hwnd)
+}
+
+func formatRecoveryTime(value time.Time) string {
+	if value.IsZero() {
+		return "(없음)"
+	}
+	return value.Local().Format("2006-01-02 15:04:05")
 }
 
 func emptyValue(values ...string) string {
@@ -391,11 +574,12 @@ func (dialog *recoveryDialog) resize(width, height int32) {
 	listHeight := detailY - dialog.px(14) - listTop
 	call("MoveWindow", dialog.list, uintptr(margin), uintptr(listTop), uintptr(width-2*margin), uintptr(listHeight), 1)
 	call("MoveWindow", dialog.detail, uintptr(margin), uintptr(detailY), uintptr(width-2*margin), uintptr(detailHeight), 1)
-	call("MoveWindow", dialog.refreshButton, uintptr(margin), uintptr(buttonY), uintptr(dialog.px(110)), uintptr(buttonHeight), 1)
-	call("MoveWindow", dialog.folderButton, uintptr(dialog.px(140)), uintptr(buttonY), uintptr(dialog.px(140)), uintptr(buttonHeight), 1)
-	call("MoveWindow", dialog.exportButton, uintptr(dialog.px(294)), uintptr(buttonY), uintptr(dialog.px(190)), uintptr(buttonHeight), 1)
-	call("MoveWindow", dialog.deleteButton, uintptr(dialog.px(498)), uintptr(buttonY), uintptr(dialog.px(145)), uintptr(buttonHeight), 1)
-	call("MoveWindow", dialog.closeButton, uintptr(width-dialog.px(146)), uintptr(buttonY), uintptr(dialog.px(130)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.refreshButton, uintptr(margin), uintptr(buttonY), uintptr(dialog.px(90)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.folderButton, uintptr(dialog.px(114)), uintptr(buttonY), uintptr(dialog.px(110)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.exportButton, uintptr(dialog.px(232)), uintptr(buttonY), uintptr(dialog.px(150)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.retryButton, uintptr(dialog.px(390)), uintptr(buttonY), uintptr(dialog.px(110)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.deleteButton, uintptr(dialog.px(508)), uintptr(buttonY), uintptr(dialog.px(110)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.closeButton, uintptr(width-dialog.px(106)), uintptr(buttonY), uintptr(dialog.px(90)), uintptr(buttonHeight), 1)
 }
 
 func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
@@ -414,11 +598,16 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case idRecoveryExport:
 			dialog.exportSelected()
+		case idRecoveryRetry:
+			dialog.retrySelected()
 		case idRecoveryDelete:
 			dialog.deleteSelected()
 		case idRecoveryClose:
-			call("DestroyWindow", h)
+			dialog.close()
 		}
+		return 0
+	case wmRecoveryDone:
+		dialog.finishRetry(<-dialog.retryResults)
 		return 0
 	case wmNotify:
 		if lp != 0 {
@@ -441,7 +630,7 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 			return 0
 		}
 	case wmClose:
-		call("DestroyWindow", h)
+		dialog.close()
 		return 0
 	}
 	return call("DefWindowProcW", h, uintptr(msg), wp, lp)
