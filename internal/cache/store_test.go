@@ -332,6 +332,60 @@ func TestOpenRecoveryValidatesPreservedFile(t *testing.T) {
 	}
 }
 
+func TestUsageSeparatesRecoveryAndUnclassifiedBytes(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preservedFile, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preservedFile.WriteString("preserved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := preservedFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Preserve(Preservation{ProfileID: "profile-1", StagingPath: preservedFile.Name(), RemotePath: "/preserved.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	unclassified, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unclassified.WriteString("raw"); err != nil {
+		t.Fatal(err)
+	}
+	if err := unclassified.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Directory(), "other.tmp"), []byte("overhead"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := store.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := store.Usage(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.RecoveryItems != 2 || usage.RecoveryBytes != int64(len("preserved")+len("raw")) {
+		t.Fatalf("recovery usage = %+v", usage)
+	}
+	if usage.UnclassifiedItems != 1 || usage.UnclassifiedBytes != int64(len("raw")) {
+		t.Fatalf("unclassified usage = %+v", usage)
+	}
+	if got := usage.Profiles["profile-1"]; got.Items != 1 || got.Bytes != int64(len("preserved")) {
+		t.Fatalf("profile usage = %+v", got)
+	}
+	if usage.TotalBytes <= usage.RecoveryBytes {
+		t.Fatalf("total cache bytes did not include metadata/overhead: %+v", usage)
+	}
+}
+
 func TestDeleteRecoveryItems(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(filepath.Join(root, "cache"))

@@ -104,6 +104,7 @@ type window struct {
 	passwordVisible, passphraseVisible                                                   bool
 	results                                                                              chan taskResult
 	recoveryItems                                                                        []localcache.RecoveryItem
+	cacheUsage                                                                           localcache.Usage
 }
 
 // Run owns all HWNDs on one OS thread. Network calls never run in WndProc.
@@ -143,7 +144,11 @@ func Run(hidden bool) error {
 	if err != nil {
 		return err
 	}
-	w := &window{settings: s, filename: filename, manager: connection.New(connection.Mount), selected: -1, sessionSecrets: map[string]config.Secrets{}, results: make(chan taskResult, 1), recoveryItems: recoveryItems}
+	cacheUsage, err := cacheStore.Usage(recoveryItems)
+	if err != nil {
+		return err
+	}
+	w := &window{settings: s, filename: filename, manager: connection.New(connection.Mount), selected: -1, sessionSecrets: map[string]config.Secrets{}, results: make(chan taskResult, 1), recoveryItems: recoveryItems, cacheUsage: cacheUsage}
 	active = w
 	defer func() { active = nil }()
 	call("SetProcessDPIAware")
@@ -762,13 +767,23 @@ func (w *window) report(err error) {
 	}
 }
 
+func (w *window) reportConnectionError(id string, err error) {
+	w.manager.RecordError(id, err)
+	w.refreshList()
+	w.report(err)
+}
+
 func (w *window) anyConnected() bool {
 	for _, p := range w.settings.Profiles {
-		if w.manager.State(p.ID) != "연결 안 됨" {
+		if !connectionInactive(w.manager.State(p.ID)) {
 			return true
 		}
 	}
 	return false
+}
+
+func connectionInactive(state string) bool {
+	return state == "연결 안 됨" || state == "오류"
 }
 
 type profileListRow struct {
@@ -835,7 +850,7 @@ type profileButtonState struct {
 func profileButtons(selected int, dirty bool, states []string) profileButtonState {
 	result := profileButtonState{save: dirty}
 	for _, state := range states {
-		if state == "연결 안 됨" {
+		if connectionInactive(state) {
 			result.connectAll = true
 		} else {
 			result.disconnectAll = true
@@ -844,7 +859,7 @@ func profileButtons(selected int, dirty bool, states []string) profileButtonStat
 	if selected < 0 || selected >= len(states) {
 		return result
 	}
-	if states[selected] == "연결 안 됨" {
+	if connectionInactive(states[selected]) {
 		result.delete = true
 		result.connect = true
 	} else {
@@ -878,7 +893,19 @@ func (w *window) updateActionButtons() {
 }
 
 func (w *window) updateRecoveryButton() {
-	setText(w.cacheButton, fmt.Sprintf("보존 캐시 (%d)", len(w.recoveryItems)))
+	setText(w.cacheButton, fmt.Sprintf("보존 캐시 (%d · %s)", len(w.recoveryItems), formatByteSize(w.cacheUsage.RecoveryBytes)))
+}
+
+func profileDiagnosticText(diagnostic connection.Diagnostic, usage localcache.ProfileUsage) string {
+	result := fmt.Sprintf("상태: %s · 보존 캐시: %d개 / %s", diagnostic.State, usage.Items, formatByteSize(usage.Bytes))
+	if diagnostic.LastError != "" {
+		when := "시각 없음"
+		if !diagnostic.ErrorAt.IsZero() {
+			when = diagnostic.ErrorAt.Local().Format("2006-01-02 15:04:05")
+		}
+		result += "\r\n마지막 오류 (" + when + "): " + diagnostic.LastError
+	}
+	return result
 }
 
 func normalizedDriveLetter(value string) string {
@@ -1057,9 +1084,9 @@ func (w *window) loadEditor(index int) {
 	w.maskSecrets()
 	w.updateProtocolControls()
 	if err != nil {
-		w.report(err)
+		w.reportConnectionError(p.ID, err)
 	} else {
-		setText(w.status, "저장된 설정입니다. 변경 후에는 저장을 눌러주세요.")
+		setText(w.status, profileDiagnosticText(w.manager.Diagnostic(p.ID), w.cacheUsage.Profiles[p.ID]))
 	}
 	w.clearDirty()
 }
@@ -1112,7 +1139,7 @@ func (w *window) save() bool {
 	currentID := ""
 	if w.selected >= 0 {
 		currentID = w.settings.Profiles[w.selected].ID
-		if w.manager.State(currentID) != "연결 안 됨" {
+		if !connectionInactive(w.manager.State(currentID)) {
 			w.report(errors.New("설정 변경 전에 연결을 해제하세요"))
 			return false
 		}
@@ -1187,7 +1214,7 @@ func (w *window) deleteProfile() {
 		return
 	}
 	p := w.settings.Profiles[w.selected]
-	if w.manager.State(p.ID) != "연결 안 됨" {
+	if !connectionInactive(w.manager.State(p.ID)) {
 		w.report(errors.New("연결을 해제한 뒤 설정을 삭제하세요"))
 		return
 	}
@@ -1215,16 +1242,16 @@ func (w *window) connect(index int) {
 	p := w.settings.Profiles[index]
 	used, driveErr := windows.GetLogicalDrives()
 	if driveErr != nil {
-		w.report(fmt.Errorf("Windows 드라이브 문자 확인 실패: %w", driveErr))
+		w.reportConnectionError(p.ID, fmt.Errorf("Windows 드라이브 문자 확인 실패: %w", driveErr))
 		return
 	}
 	if err := validateDriveAssignment(p.Profile.DriveLetter, p.ID, w.settings.Profiles, used); err != nil {
-		w.report(err)
+		w.reportConnectionError(p.ID, err)
 		return
 	}
 	s, err := w.secrets(p)
 	if err != nil {
-		w.report(err)
+		w.reportConnectionError(p.ID, err)
 		return
 	}
 	w.task(func() error {
@@ -1242,19 +1269,24 @@ func (w *window) connectAll(auto bool) {
 			if auto && !p.Profile.AutoConnect {
 				continue
 			}
-			if w.manager.State(p.ID) != "연결 안 됨" {
+			if !connectionInactive(w.manager.State(p.ID)) {
 				continue
 			}
 			used, driveErr := windows.GetLogicalDrives()
 			if driveErr != nil {
+				w.manager.RecordError(p.ID, driveErr)
 				result = errors.Join(result, fmt.Errorf("%s: Windows 드라이브 문자 확인 실패: %w", p.Profile.Name, driveErr))
 				continue
 			}
 			if driveErr = validateDriveAssignment(p.Profile.DriveLetter, p.ID, profiles, used); driveErr != nil {
+				w.manager.RecordError(p.ID, driveErr)
 				result = errors.Join(result, fmt.Errorf("%s: %w", p.Profile.Name, driveErr))
 				continue
 			}
 			s, err := w.secrets(p)
+			if err != nil {
+				w.manager.RecordError(p.ID, err)
+			}
 			if err == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				err = w.manager.Connect(ctx, p.ID, p.Profile, s)
@@ -1327,7 +1359,12 @@ func (w *window) refreshRecoveryItems() error {
 	if err != nil {
 		return err
 	}
+	usage, err := store.Usage(items)
+	if err != nil {
+		return err
+	}
 	w.recoveryItems = items
+	w.cacheUsage = usage
 	w.updateRecoveryButton()
 	return nil
 }
@@ -1400,7 +1437,7 @@ func (w *window) command(id, notice int, control uintptr) {
 	if id >= 1000 && id < 1000+len(w.settings.Profiles) {
 		i := id - 1000
 		p := w.settings.Profiles[i]
-		if w.manager.State(p.ID) == "연결 안 됨" {
+		if connectionInactive(w.manager.State(p.ID)) {
 			w.connect(i)
 		} else {
 			w.disconnect([]config.SavedProfile{p}, false)

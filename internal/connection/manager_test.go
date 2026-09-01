@@ -98,11 +98,55 @@ func TestManagerConnectFailureAllowsRetry(t *testing.T) {
 	if err := m.Connect(context.Background(), "id", profile("X"), config.Secrets{}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
-	if m.State("id") != "연결 안 됨" {
+	if m.State("id") != "오류" {
 		t.Fatal("failed reservation retained")
+	}
+	diagnostic := m.Diagnostic("id")
+	if diagnostic.State != "오류" || diagnostic.LastError == "" || diagnostic.ErrorAt.IsZero() {
+		t.Fatalf("missing failure diagnostic: %+v", diagnostic)
 	}
 	if err := m.Connect(context.Background(), "id", profile("X"), config.Secrets{}); err != nil {
 		t.Fatal(err)
+	}
+	if diagnostic = m.Diagnostic("id"); diagnostic.State != "연결됨" || diagnostic.LastError != "" {
+		t.Fatalf("successful retry kept failure diagnostic: %+v", diagnostic)
+	}
+}
+
+func TestManagerKeepsDisconnectFailureDiagnostic(t *testing.T) {
+	closeErr := errors.New("open handles")
+	session := &fakeSession{err: closeErr}
+	m := New(func(context.Context, string, config.Profile, config.Secrets) (Session, error) { return session, nil })
+	if err := m.Connect(context.Background(), "id", profile("X"), config.Secrets{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Disconnect("id"); !errors.Is(err, closeErr) {
+		t.Fatal(err)
+	}
+	diagnostic := m.Diagnostic("id")
+	if diagnostic.State != "연결됨" || diagnostic.LastError != closeErr.Error() || diagnostic.ErrorAt.IsZero() {
+		t.Fatalf("disconnect diagnostic = %+v", diagnostic)
+	}
+}
+
+func TestManagerRecordsPreflightFailure(t *testing.T) {
+	m := New(func(context.Context, string, config.Profile, config.Secrets) (Session, error) {
+		t.Fatal("factory called")
+		return nil, nil
+	})
+	invalid := profile("X")
+	invalid.Host = ""
+	if err := m.Connect(context.Background(), "id", invalid, config.Secrets{}); err == nil {
+		t.Fatal("invalid profile connected")
+	}
+	if diagnostic := m.Diagnostic("id"); diagnostic.State != "오류" || diagnostic.LastError == "" || diagnostic.ErrorAt.IsZero() {
+		t.Fatalf("preflight diagnostic = %+v", diagnostic)
+	}
+
+	external := errors.New("credential decrypt failed")
+	m.RecordError("other", external)
+	if diagnostic := m.Diagnostic("other"); diagnostic.State != "오류" || diagnostic.LastError != external.Error() {
+		t.Fatalf("external diagnostic = %+v", diagnostic)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/danhk0612/DK-Drive/internal/config"
 )
@@ -19,13 +20,22 @@ type entry struct {
 	session Session
 }
 
+type Diagnostic struct {
+	State     string
+	LastError string
+	ErrorAt   time.Time
+}
+
 type Manager struct {
 	mu      sync.Mutex
 	entries map[string]*entry
+	errors  map[string]Diagnostic
 	factory Factory
 }
 
-func New(factory Factory) *Manager { return &Manager{entries: map[string]*entry{}, factory: factory} }
+func New(factory Factory) *Manager {
+	return &Manager{entries: map[string]*entry{}, errors: map[string]Diagnostic{}, factory: factory}
+}
 
 func (m *Manager) State(id string) string {
 	m.mu.Lock()
@@ -33,7 +43,37 @@ func (m *Manager) State(id string) string {
 	if e := m.entries[id]; e != nil {
 		return e.state
 	}
+	if d, ok := m.errors[id]; ok && d.LastError != "" {
+		return "오류"
+	}
 	return "연결 안 됨"
+}
+
+func (m *Manager) Diagnostic(id string) Diagnostic {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := m.errors[id]
+	if e := m.entries[id]; e != nil {
+		result.State = e.state
+	} else if result.LastError != "" {
+		result.State = "오류"
+	} else {
+		result.State = "연결 안 됨"
+	}
+	return result
+}
+
+func (m *Manager) RecordError(id string, err error) {
+	if id == "" || err == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := "오류"
+	if e := m.entries[id]; e != nil {
+		state = e.state
+	}
+	m.errors[id] = Diagnostic{State: state, LastError: err.Error(), ErrorAt: time.Now().UTC()}
 }
 
 func (m *Manager) Connect(ctx context.Context, id string, p config.Profile, secret config.Secrets) error {
@@ -41,6 +81,7 @@ func (m *Manager) Connect(ctx context.Context, id string, p config.Profile, secr
 		return errors.New("연결 ID가 필요합니다")
 	}
 	if err := p.Validate(); err != nil {
+		m.RecordError(id, err)
 		return err
 	}
 	m.mu.Lock()
@@ -63,8 +104,10 @@ func (m *Manager) Connect(ctx context.Context, id string, p config.Profile, secr
 	defer m.mu.Unlock()
 	if err != nil {
 		delete(m.entries, id)
+		m.errors[id] = Diagnostic{State: "오류", LastError: err.Error(), ErrorAt: time.Now().UTC()}
 		return err
 	}
+	delete(m.errors, id)
 	e.session, e.state = s, "연결됨"
 	return nil
 }
@@ -108,9 +151,11 @@ func (m *Manager) disconnect(id string, force bool) (string, error) {
 	defer m.mu.Unlock()
 	if err != nil {
 		e.state = "연결됨"
+		m.errors[id] = Diagnostic{State: e.state, LastError: err.Error(), ErrorAt: time.Now().UTC()}
 		return message, err
 	}
 	delete(m.entries, id)
+	delete(m.errors, id)
 	return message, nil
 }
 

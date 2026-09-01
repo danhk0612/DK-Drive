@@ -5,9 +5,12 @@ package desktop
 import (
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
+	localcache "github.com/danhk0612/DK-Drive/internal/cache"
 	"github.com/danhk0612/DK-Drive/internal/config"
+	"github.com/danhk0612/DK-Drive/internal/connection"
 )
 
 func TestNativeLayoutAMD64(t *testing.T) {
@@ -221,6 +224,7 @@ func TestProfileButtons(t *testing.T) {
 	}{
 		{name: "new dirty profile", selected: -1, dirty: true, want: profileButtonState{save: true}},
 		{name: "disconnected selection", selected: 0, states: []string{"연결 안 됨"}, want: profileButtonState{delete: true, connect: true, connectAll: true}},
+		{name: "failed selection can retry", selected: 0, states: []string{"오류"}, want: profileButtonState{delete: true, connect: true, connectAll: true}},
 		{name: "connected selection", selected: 0, states: []string{"연결됨"}, want: profileButtonState{disconnect: true, disconnectAll: true}},
 		{name: "mixed profiles", selected: 1, dirty: true, states: []string{"연결됨", "연결 안 됨"}, want: profileButtonState{save: true, delete: true, connect: true, connectAll: true, disconnectAll: true}},
 	}
@@ -230,6 +234,16 @@ func TestProfileButtons(t *testing.T) {
 				t.Fatalf("profileButtons() = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestProfileDiagnosticText(t *testing.T) {
+	at := time.Date(2026, 9, 1, 3, 4, 5, 0, time.Local)
+	got := profileDiagnosticText(connection.Diagnostic{State: "오류", LastError: "연결 거부", ErrorAt: at}, localcache.ProfileUsage{Items: 2, Bytes: 1536})
+	for _, want := range []string{"상태: 오류", "2개 / 1.5 KB", "2026-09-01 03:04:05", "연결 거부"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("diagnostic %q missing %q", got, want)
+		}
 	}
 }
 
