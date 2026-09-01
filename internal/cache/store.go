@@ -2,7 +2,9 @@ package cache
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,6 +182,54 @@ func (store *Store) Scan() ([]RecoveryItem, error) {
 	return items, nil
 }
 
+func (store *Store) Export(item RecoveryItem, destination string) error {
+	if item.Metadata.RecoveryState != StatePreserved && item.Metadata.RecoveryState != StateMissingMetadata {
+		return fmt.Errorf("현재 복구 상태에서는 로컬 내보내기를 할 수 없습니다: %s", item.Metadata.RecoveryState)
+	}
+	sourcePath, err := store.safeStagingPath(item.Metadata.StagingPath)
+	if err != nil {
+		return err
+	}
+	sourceInfo, err := os.Lstat(sourcePath)
+	if err != nil {
+		return fmt.Errorf("내보낼 캐시 파일 확인 실패: %w", err)
+	}
+	if sourceInfo.Mode()&os.ModeSymlink != 0 || !sourceInfo.Mode().IsRegular() {
+		return fmt.Errorf("일반 파일이 아닌 캐시는 내보낼 수 없습니다: %s", sourcePath)
+	}
+	destinationPath, err := filepath.Abs(destination)
+	if err != nil {
+		return fmt.Errorf("내보낼 위치 확인 실패: %w", err)
+	}
+	if store.contains(destinationPath) {
+		return errors.New("보존 캐시 폴더 안으로는 내보낼 수 없습니다")
+	}
+	if destinationInfo, statErr := os.Lstat(destinationPath); statErr == nil {
+		if destinationInfo.Mode()&os.ModeSymlink != 0 || os.SameFile(sourceInfo, destinationInfo) {
+			return errors.New("캐시 원본 또는 심볼릭 링크에는 내보낼 수 없습니다")
+		}
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("내보낼 파일 확인 실패: %w", statErr)
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("보존 캐시 열기 실패: %w", err)
+	}
+	destinationFile, err := os.OpenFile(destinationPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		_ = source.Close()
+		return fmt.Errorf("내보낼 파일 생성 실패: %w", err)
+	}
+	_, copyErr := io.Copy(destinationFile, source)
+	syncErr := destinationFile.Sync()
+	closeErr := destinationFile.Close()
+	sourceCloseErr := source.Close()
+	if err := errors.Join(copyErr, syncErr, closeErr, sourceCloseErr); err != nil {
+		return fmt.Errorf("보존 캐시 내보내기 실패: %w", err)
+	}
+	return nil
+}
+
 func (store *Store) scanMetadata(metadataPath, expectedStaging string) RecoveryItem {
 	item := RecoveryItem{MetadataPath: metadataPath}
 	data, err := os.ReadFile(metadataPath)
@@ -271,4 +321,9 @@ func (store *Store) safeStagingPath(value string) (string, error) {
 		return "", fmt.Errorf("캐시 루트 밖의 스테이징 경로는 사용할 수 없습니다: %s", value)
 	}
 	return filepath.Join(store.directory, relative), nil
+}
+
+func (store *Store) contains(value string) bool {
+	relative, err := filepath.Rel(store.directory, value)
+	return err == nil && !filepath.IsAbs(relative) && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }

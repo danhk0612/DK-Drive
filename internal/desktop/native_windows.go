@@ -302,6 +302,44 @@ func chooseFile(owner uintptr, title, current string, filter []uint16) (string, 
 	return "", false, fmt.Errorf("Windows 파일 선택 창 오류: 0x%04X: %w", code, callErr)
 }
 
+func chooseSaveFile(owner uintptr, title, suggested string) (string, bool, error) {
+	buffer := make([]uint16, 32768)
+	value := windows.StringToUTF16(suggested)
+	if len(value) < len(buffer) {
+		copy(buffer, value)
+	}
+	filter := fileDialogFilter("모든 파일", "*.*")
+	titleText := windows.StringToUTF16(title)
+	dialog := openFileName{
+		Size: uint32(unsafe.Sizeof(openFileName{})), Owner: owner,
+		Filter: &filter[0], FilterIndex: 1, File: &buffer[0], MaxFile: uint32(len(buffer)),
+		Title: &titleText[0], Flags: 0x2 | 0x8 | 0x800 | 0x80000 | 0x2000000,
+	}
+	result, _, callErr := comdlg32.NewProc("GetSaveFileNameW").Call(uintptr(unsafe.Pointer(&dialog)))
+	runtime.KeepAlive(filter)
+	runtime.KeepAlive(titleText)
+	runtime.KeepAlive(buffer)
+	if result != 0 {
+		return windows.UTF16ToString(buffer), true, nil
+	}
+	code, _, _ := comdlg32.NewProc("CommDlgExtendedError").Call()
+	if code == 0 {
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("Windows 저장 위치 선택 창 오류: 0x%04X: %w", code, callErr)
+}
+
+func openFolder(path string) error {
+	verb, target := utf("open"), utf(path)
+	result, _, callErr := shell32.NewProc("ShellExecuteW").Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(target)), 0, 0, 1)
+	runtime.KeepAlive(verb)
+	runtime.KeepAlive(target)
+	if result <= 32 {
+		return fmt.Errorf("캐시 폴더 열기 실패 (Windows 오류 %d): %w", result, callErr)
+	}
+	return nil
+}
+
 func appIconBits(size int) ([]byte, []byte) {
 	andStride := ((size + 15) / 16) * 2
 	andBits := make([]byte, andStride*size)

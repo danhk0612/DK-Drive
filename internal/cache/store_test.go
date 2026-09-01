@@ -225,3 +225,72 @@ func TestScanDoesNotFollowStagingSymlink(t *testing.T) {
 		t.Fatalf("items = %+v", items)
 	}
 }
+
+func TestExportCopiesBytesAndPreservesRecoveryItem(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("한글\x00binary\xff")
+	if _, err := file.Write(want); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Preserve(Preservation{StagingPath: file.Name(), RemotePath: "/한글 파일.bin", Reason: ReasonUploadFailed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(filepath.Dir(store.Directory()), "내보낸 파일.bin")
+	if err := store.Export(item, destination); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("exported bytes = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(file.Name()); err != nil {
+		t.Fatalf("staging removed: %v", err)
+	}
+	if _, err := os.Stat(item.MetadataPath); err != nil {
+		t.Fatalf("metadata removed: %v", err)
+	}
+}
+
+func TestExportRejectsCacheDestinationAndUnavailableState(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(filepath.Join(root, "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("keep"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	item := RecoveryItem{Metadata: RecoveryMetadata{StagingPath: file.Name(), RecoveryState: StateMissingMetadata}}
+	if err := store.Export(item, filepath.Join(store.Directory(), "copy.txt")); err == nil {
+		t.Fatal("export inside cache accepted")
+	}
+	item.Metadata.RecoveryState = StateInvalidMetadata
+	if err := store.Export(item, filepath.Join(root, "copy.txt")); err == nil {
+		t.Fatal("invalid recovery item exported")
+	}
+	got, err := os.ReadFile(file.Name())
+	if err != nil || string(got) != "keep" {
+		t.Fatalf("source changed: %q, %v", got, err)
+	}
+}

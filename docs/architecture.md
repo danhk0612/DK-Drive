@@ -128,6 +128,10 @@ Passphrase, 개인키 내용과 인증 헤더는 기록하지 않는다.
 밖의 경로와 심볼릭 링크는 복구 대상으로 신뢰하지 않는다. 이 단계에서는 항목을
 자동 삭제하거나 원격 서버에 자동 재전송하지 않는다.
 
+첫 복구 화면은 검사 결과와 상세 오류, 캐시 폴더 열기와 로컬 내보내기만 제공한다.
+내보내기는 원본 스테이징 파일과 메타데이터를 변경하지 않으며, 캐시 폴더 내부,
+심볼릭 링크와 정합성 검사를 통과하지 못한 항목은 대상으로 사용하지 않는다.
+
 참고: [Win32 창 생성](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowexw),
 [Shell 알림 아이콘](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyiconw),
 [DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata),

@@ -41,6 +41,7 @@ const (
 	idBrowseKnownHosts
 	idTogglePassword
 	idTogglePassphrase
+	idRecovery
 )
 
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
@@ -93,7 +94,7 @@ type window struct {
 	list, status, closeToTray, startup, newButton, saveButton                                    uintptr
 	testButton                                                                                   uintptr
 	authHint                                                                                     uintptr
-	exitButton                                                                                   uintptr
+	exitButton, cacheButton                                                                      uintptr
 	deleteButton, connectButton, disconnectButton, connectAllButton, disconnectAllButton         uintptr
 	name, protocol, drive, port, host, root, user, volume, key, knownHosts, password, passphrase uintptr
 	keyBrowse, knownHostsBrowse, passwordToggle, passphraseToggle                                uintptr
@@ -476,7 +477,8 @@ func (w *window) build() error {
 	label("FTP/HTTP는 평문 전송. 강제 해제 시 미저장 데이터가 손실될 수 있습니다.", 470, 505, 620)
 	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 520, 300, idCloseToTray)
 	w.startup = checkbox("Windows 로그인 시 실행", 16, 547, 300, idStartup)
-	w.exitButton = button("프로그램 종료", 16, 580, 430, idExit)
+	w.cacheButton = button("보존 캐시", 16, 580, 205, idRecovery)
+	w.exitButton = button("프로그램 종료", 241, 580, 205, idExit)
 	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 470, 540, 610, 70, 0)
 	w.setTabOrder([]uintptr{
 		w.list, w.newButton, w.name, w.drive, w.protocol, w.port, w.host, w.root, w.user, w.volume,
@@ -484,7 +486,7 @@ func (w *window) build() error {
 		w.password, w.passwordToggle, w.passphrase, w.passphraseToggle,
 		w.readOnly, w.autoConnect, w.remember, w.insecure,
 		w.saveButton, w.testButton, w.deleteButton, w.connectButton, w.disconnectButton,
-		w.connectAllButton, w.disconnectAllButton, w.closeToTray, w.startup, w.exitButton,
+		w.connectAllButton, w.disconnectAllButton, w.closeToTray, w.startup, w.cacheButton, w.exitButton,
 	})
 	var client rect
 	if call("GetClientRect", w.hwnd, uintptr(unsafe.Pointer(&client))) != 0 {
@@ -497,6 +499,7 @@ func (w *window) build() error {
 		return startErr
 	}
 	check(w.startup, enabled)
+	w.updateRecoveryButton()
 	w.clearDirty()
 	return err
 }
@@ -870,6 +873,10 @@ func (w *window) updateActionButtons() {
 	} {
 		call("EnableWindow", control.handle, enabledWord(control.enabled))
 	}
+}
+
+func (w *window) updateRecoveryButton() {
+	setText(w.cacheButton, fmt.Sprintf("보존 캐시 (%d)", len(w.recoveryItems)))
 }
 
 func normalizedDriveLetter(value string) string {
@@ -1293,10 +1300,29 @@ func (w *window) disconnect(profiles []config.SavedProfile, exiting bool) {
 			setText(w.status, result.forceMessage)
 			alert(w.hwnd, result.forceMessage)
 		}
+		if !exiting {
+			if scanErr := w.refreshRecoveryItems(); scanErr != nil {
+				alert(w.hwnd, scanErr.Error())
+			}
+		}
 		if exiting && err == nil && len(result.canceled) == 0 {
 			call("DestroyWindow", w.hwnd)
 		}
 	})
+}
+
+func (w *window) refreshRecoveryItems() error {
+	store, err := localcache.New("")
+	if err != nil {
+		return err
+	}
+	items, err := store.Scan()
+	if err != nil {
+		return err
+	}
+	w.recoveryItems = items
+	w.updateRecoveryButton()
+	return nil
 }
 
 func (w *window) handleListNotification(value uintptr) bool {
@@ -1405,6 +1431,10 @@ func (w *window) command(id, notice int, control uintptr) {
 		w.connectAll(false)
 	case idDisconnectAll:
 		w.disconnect(w.settings.Profiles, false)
+	case idRecovery:
+		if err := showRecoveryDialog(w); err != nil {
+			w.report(err)
+		}
 	case idExit:
 		w.exit()
 	case idProtocol:
