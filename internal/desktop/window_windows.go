@@ -71,6 +71,7 @@ type keyboardCommand uint8
 
 const (
 	keyboardNone keyboardCommand = iota
+	keyboardSelectAll
 	keyboardSave
 	keyboardCancelEdit
 )
@@ -165,7 +166,7 @@ func Run(hidden bool) error {
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(class.Name)), uintptr(instance))
 	title := utf("DKDrive " + app.Version + " — 연결 관리")
-	h, _, createErr := user32.NewProc("CreateWindowExW").Call(0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)), 0x00ca0000, 0x80000000, 0x80000000, uintptr(w.px(1150)), uintptr(w.px(680)), 0, 0, uintptr(instance), 0)
+	h, _, createErr := user32.NewProc("CreateWindowExW").Call(0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)), wsOverlappedWindow, 0x80000000, 0x80000000, uintptr(w.px(1150)), uintptr(w.px(680)), 0, 0, uintptr(instance), 0)
 	runtime.KeepAlive(title)
 	if h == 0 {
 		return fmt.Errorf("창 생성 실패: %w", createErr)
@@ -272,6 +273,9 @@ func resizeBounds(bounds rect, rule layoutRule, deltaX, deltaY int32) rect {
 }
 
 func keyboardCommandFor(key uintptr, controlDown, dirty bool) keyboardCommand {
+	if controlDown && key == 'A' {
+		return keyboardSelectAll
+	}
 	if dirty && controlDown && key == 'S' {
 		return keyboardSave
 	}
@@ -520,6 +524,13 @@ func (w *window) handleKeyboardMessage(msg *message) bool {
 	}
 	controlDown := int16(call("GetKeyState", 0x11)) < 0 // VK_CONTROL
 	switch keyboardCommandFor(msg.WParam, controlDown, w.dirty) {
+	case keyboardSelectAll:
+		focused := call("GetFocus")
+		if !w.isTextInput(focused) {
+			return false
+		}
+		send(focused, emSetSel, 0, ^uintptr(0))
+		return true
 	case keyboardSave:
 		w.save()
 		return true
@@ -529,6 +540,18 @@ func (w *window) handleKeyboardMessage(msg *message) bool {
 	default:
 		return false
 	}
+}
+
+func (w *window) isTextInput(h uintptr) bool {
+	for _, input := range []uintptr{
+		w.name, w.port, w.host, w.root, w.user, w.volume,
+		w.key, w.knownHosts, w.password, w.passphrase,
+	} {
+		if h == input {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *window) cancelEditorChanges() {

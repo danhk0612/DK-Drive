@@ -30,8 +30,10 @@ const (
 	wmAutoConnect               = 0x8003
 	bsCheck                     = 3
 	bsDefault                   = 1
+	wsOverlappedWindow          = 0x00cf0000
 	bmGetCheck                  = 0xf0
 	bmSetCheck                  = 0xf1
+	emSetSel                    = 0xb1
 	cbAddString                 = 0x143
 	cbGetCurSel                 = 0x147
 	cbReset                     = 0x14b

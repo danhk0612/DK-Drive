@@ -92,6 +92,9 @@ func TestLayoutRulesAndResize(t *testing.T) {
 }
 
 func TestKeyboardCommand(t *testing.T) {
+	if got := keyboardCommandFor('A', true, false); got != keyboardSelectAll {
+		t.Fatalf("Ctrl+A command: %d", got)
+	}
 	if got := keyboardCommandFor('S', true, true); got != keyboardSave {
 		t.Fatalf("Ctrl+S command: %d", got)
 	}
@@ -99,6 +102,7 @@ func TestKeyboardCommand(t *testing.T) {
 		t.Fatalf("Escape command: %d", got)
 	}
 	for _, got := range []keyboardCommand{
+		keyboardCommandFor('A', false, true),
 		keyboardCommandFor('S', false, true),
 		keyboardCommandFor('S', true, false),
 		keyboardCommandFor(0x1b, false, false),
@@ -106,6 +110,12 @@ func TestKeyboardCommand(t *testing.T) {
 		if got != keyboardNone {
 			t.Fatalf("unexpected keyboard command: %d", got)
 		}
+	}
+}
+
+func TestMainWindowStyleSupportsResize(t *testing.T) {
+	if wsOverlappedWindow != 0x00cf0000 {
+		t.Fatalf("main window style: 0x%08x", wsOverlappedWindow)
 	}
 }
 
