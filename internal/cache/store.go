@@ -260,6 +260,30 @@ func (store *Store) Export(item RecoveryItem, destination string) error {
 	return nil
 }
 
+// OpenRecovery opens a scanned recovery item's staging file after repeating
+// the same path and file-type checks used by export and delete operations.
+func (store *Store) OpenRecovery(item RecoveryItem) (*os.File, os.FileInfo, error) {
+	if item.Metadata.RecoveryState != StatePreserved {
+		return nil, nil, fmt.Errorf("현재 복구 상태에서는 원격 재시도를 할 수 없습니다: %s", item.Metadata.RecoveryState)
+	}
+	stagingPath, err := store.safeStagingPath(item.Metadata.StagingPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := os.Lstat(stagingPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("재시도할 캐시 파일 확인 실패: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("일반 파일이 아닌 캐시는 원격 재시도에 사용할 수 없습니다: %s", stagingPath)
+	}
+	file, err := os.Open(stagingPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("재시도할 캐시 파일 열기 실패: %w", err)
+	}
+	return file, info, nil
+}
+
 // Delete removes one scanned recovery item. Callers must ensure that no active
 // mount is using the store because metadata-less staging files can be live.
 func (store *Store) Delete(item RecoveryItem) error {

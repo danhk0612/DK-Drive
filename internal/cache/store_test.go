@@ -295,6 +295,43 @@ func TestExportRejectsCacheDestinationAndUnavailableState(t *testing.T) {
 	}
 }
 
+func TestOpenRecoveryValidatesPreservedFile(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := staging.WriteString("retry data"); err != nil {
+		t.Fatal(err)
+	}
+	if err := staging.Close(); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.Preserve(Preservation{StagingPath: staging.Name(), RemotePath: "/retry.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, info, err := store.OpenRecovery(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != int64(len("retry data")) {
+		t.Fatalf("size=%d", info.Size())
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	item.Metadata.RecoveryState = StateMissingMetadata
+	if _, _, err := store.OpenRecovery(item); err == nil {
+		t.Fatal("metadata-less recovery item was opened for remote retry")
+	}
+}
+
 func TestDeleteRecoveryItems(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(filepath.Join(root, "cache"))
