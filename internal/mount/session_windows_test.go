@@ -175,15 +175,36 @@ func TestForceStopReadAndDirectoryHandles(t *testing.T) {
 	}
 }
 
-func TestSessionGuardTracksDirectoryHandles(t *testing.T) {
+func TestSessionGuardClosesDirectoryHandlesForSafeStop(t *testing.T) {
 	raw, _ := visibilityFixture(t)
 	g := &guardedFS{FileSystem: raw}
 	f, err := g.OpenFile(".", os.O_RDONLY, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := g.prepareStop(); err != nil {
+		t.Fatal("directory handle blocked safe stop", err)
+	}
+	if g.open != 0 || len(g.files) != 0 {
+		t.Fatal("directory handle remained tracked")
+	}
+	if err := f.Close(); !errors.Is(err, os.ErrClosed) {
+		t.Fatal("closed directory handle remained usable", err)
+	}
+}
+
+func TestSessionGuardStillBlocksOpenReadFile(t *testing.T) {
+	raw, backend := visibilityFixture(t)
+	if err := os.WriteFile(filepath.Join(backend.root, "read.txt"), []byte("read"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	g := &guardedFS{FileSystem: raw}
+	f, err := g.OpenFile("read.txt", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := g.prepareStop(); err == nil {
-		t.Fatal("stopped with directory handle")
+		t.Fatal("stopped with open read file")
 	}
 	if err := f.Close(); err != nil {
 		t.Fatal(err)

@@ -134,8 +134,25 @@ func (g *guardedFS) forceStop() error {
 func (g *guardedFS) prepareStop() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	// Windows keeps directory enumeration handles open for shell integration,
+	// including immediately after an automatic mount. They cannot contain
+	// pending writes, so close them before deciding whether a safe detach is
+	// blocked. File handles and previous close/upload failures still block.
+	var directoryErr error
+	for f := range g.files {
+		if _, ok := f.File.(*directoryFile); !ok {
+			continue
+		}
+		directoryErr = errors.Join(directoryErr, f.File.Close())
+		f.closed = true
+		g.open--
+		delete(g.files, f)
+	}
+	if directoryErr != nil {
+		return fmt.Errorf("폴더 핸들 닫기 실패: %w", directoryErr)
+	}
 	if g.open != 0 {
-		return fmt.Errorf("파일/폴더 핸들 %d개가 열려 있습니다; 탐색기와 편집기를 닫고 다시 해제하세요", g.open)
+		return fmt.Errorf("파일 핸들 %d개가 열려 있습니다; 탐색기와 편집기를 닫고 다시 해제하세요", g.open)
 	}
 	if g.closeErr != nil {
 		return fmt.Errorf("파일 닫기/업로드 실패가 있어 해제를 중단했습니다. 캐시 보존 위치: %s: %w", g.cache, g.closeErr)

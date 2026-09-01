@@ -136,6 +136,9 @@ Passphrase, 개인키 내용과 인증 헤더는 기록하지 않는다.
 `드라이브` 하위 메뉴의 프로필 항목은 기존 개별 연결·안전 해제 흐름을 토글하고,
 드라이브 추가와 전체 연결·해제도 같은 하위 메뉴에 둔다. 연결 이름은 Windows
 볼륨명으로도 사용하며 기존 `VolumeName` 설정 필드는 읽기 호환용으로 유지한다.
+일반 해제는 Windows 셸이 유지하는 디렉터리 열거 핸들을 안전하게 닫되, 열린 파일
+핸들과 닫기·업로드 실패가 있으면 기존처럼 해제를 중단하고 강제 해제 확인으로
+넘긴다.
 
 참고: [Win32 창 생성](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowexw),
 [Shell 알림 아이콘](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyiconw),
