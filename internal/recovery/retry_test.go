@@ -3,6 +3,7 @@ package recovery
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -76,6 +77,22 @@ func TestUploadPublishesAndKeepsRecoveryItem(t *testing.T) {
 	}
 }
 
+func TestUploadRejectsPrematureEOF(t *testing.T) {
+	data := bytes.Repeat([]byte("cache"), 100)
+	store, item := recoveryFixture(t, data)
+	backend := newMemoryBackend()
+	backend.onOpenWrite = func() {
+		if err := os.Truncate(item.Metadata.StagingPath, int64(len(data)/2)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := Upload(context.Background(), store, item, backend, "retry.txt")
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("Upload error=%v, want io.ErrUnexpectedEOF", err)
+	}
+}
+
 func TestAlternatePath(t *testing.T) {
 	at := time.Date(2026, 9, 1, 15, 4, 5, 0, time.UTC)
 	if got := AlternatePath("folder/report.txt", at); got != "folder/report.recovered-20260901-150405.txt" {
@@ -112,8 +129,9 @@ type memoryObject struct {
 }
 
 type memoryBackend struct {
-	mu      sync.Mutex
-	entries map[string]memoryObject
+	mu          sync.Mutex
+	entries     map[string]memoryObject
+	onOpenWrite func()
 }
 
 func newMemoryBackend() *memoryBackend { return &memoryBackend{entries: map[string]memoryObject{}} }
@@ -129,17 +147,22 @@ func (backend *memoryBackend) Stat(_ context.Context, name string) (vfs.Entry, e
 }
 
 func (backend *memoryBackend) OpenWrite(_ context.Context, name string, _ vfs.WriteOptions) (vfs.WriteHandle, error) {
+	if backend.onOpenWrite != nil {
+		backend.onOpenWrite()
+	}
 	return &memoryWriter{backend: backend, name: name}, nil
 }
 
 func (backend *memoryBackend) ReadDir(context.Context, string) ([]vfs.Entry, error) { return nil, nil }
-func (backend *memoryBackend) OpenRead(context.Context, string) (io.ReadCloser, error) { return nil, fs.ErrNotExist }
-func (backend *memoryBackend) Mkdir(context.Context, string) error { return nil }
-func (backend *memoryBackend) Remove(context.Context, string, bool) error { return nil }
-func (backend *memoryBackend) Rename(context.Context, string, string) error { return nil }
+func (backend *memoryBackend) OpenRead(context.Context, string) (io.ReadCloser, error) {
+	return nil, fs.ErrNotExist
+}
+func (backend *memoryBackend) Mkdir(context.Context, string) error                 { return nil }
+func (backend *memoryBackend) Remove(context.Context, string, bool) error          { return nil }
+func (backend *memoryBackend) Rename(context.Context, string, string) error        { return nil }
 func (backend *memoryBackend) SetModTime(context.Context, string, time.Time) error { return nil }
-func (backend *memoryBackend) SetReadOnly(context.Context, string, bool) error { return nil }
-func (backend *memoryBackend) Close() error { return nil }
+func (backend *memoryBackend) SetReadOnly(context.Context, string, bool) error     { return nil }
+func (backend *memoryBackend) Close() error                                        { return nil }
 
 type memoryWriter struct {
 	backend *memoryBackend

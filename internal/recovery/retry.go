@@ -108,7 +108,10 @@ func Upload(ctx context.Context, store *localcache.Store, item localcache.Recove
 			want = remaining
 		}
 		read, readErr := file.ReadAt(buffer[:want], offset)
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
+		if errors.Is(readErr, io.EOF) && int64(read) != want {
+			return vfs.Entry{}, errors.Join(fmt.Errorf("보존 캐시 읽기 실패: %w", io.ErrUnexpectedEOF), writer.Close())
+		}
+		if readErr != nil {
 			return vfs.Entry{}, errors.Join(fmt.Errorf("보존 캐시 읽기 실패: %w", readErr), writer.Close())
 		}
 		written, writeErr := writer.WriteAt(buffer[:read], offset)

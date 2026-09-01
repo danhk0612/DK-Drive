@@ -306,6 +306,7 @@ func (dialog *recoveryDialog) beginRetry(index int, profile config.SavedProfile,
 	call("EnableWindow", dialog.refreshButton, 0)
 	call("EnableWindow", dialog.exportButton, 0)
 	call("EnableWindow", dialog.deleteButton, 0)
+	call("EnableWindow", dialog.closeButton, 0)
 	item := dialog.items[index]
 	go func() {
 		result := recoveryRetryResult{itemIndex: index, target: target}
@@ -331,6 +332,7 @@ func (dialog *recoveryDialog) beginRetry(index int, profile config.SavedProfile,
 func (dialog *recoveryDialog) finishRetry(result recoveryRetryResult) {
 	dialog.busy = false
 	call("EnableWindow", dialog.refreshButton, 1)
+	call("EnableWindow", dialog.closeButton, 1)
 	dialog.updateDetails()
 	if result.err != nil {
 		alert(dialog.hwnd, result.err.Error()+"\n\n원본 캐시와 메타데이터는 그대로 보존했습니다.")
@@ -386,6 +388,14 @@ func (dialog *recoveryDialog) offerDeleteAfterRetry(item localcache.RecoveryItem
 		}
 	}
 	dialog.refresh()
+}
+
+func (dialog *recoveryDialog) close() {
+	if dialog.busy {
+		box(dialog.hwnd, "원격 재시도가 끝날 때까지 복구 창을 닫을 수 없습니다.", 0x40)
+		return
+	}
+	call("DestroyWindow", dialog.hwnd)
 }
 
 func formatRecoveryTime(value time.Time) string {
@@ -593,7 +603,7 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 		case idRecoveryDelete:
 			dialog.deleteSelected()
 		case idRecoveryClose:
-			call("DestroyWindow", h)
+			dialog.close()
 		}
 		return 0
 	case wmRecoveryDone:
@@ -620,7 +630,7 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 			return 0
 		}
 	case wmClose:
-		call("DestroyWindow", h)
+		dialog.close()
 		return 0
 	}
 	return call("DefWindowProcW", h, uintptr(msg), wp, lp)
