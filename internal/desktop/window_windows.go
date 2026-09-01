@@ -43,6 +43,7 @@ const (
 	idTogglePassphrase
 	idRecovery
 	idOpenCacheFolder
+	idClearCache
 )
 
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
@@ -80,29 +81,29 @@ const (
 )
 
 type window struct {
-	hwnd, font, icon, smallIcon                                                                  uintptr
-	scale                                                                                        float64
-	hasTray, busy, secretFailed, loading, dirty                                                  bool
-	taskbarCreated                                                                               uint32
-	settings                                                                                     config.Settings
-	filename                                                                                     string
-	manager                                                                                      *connection.Manager
-	sessionSecrets                                                                               map[string]config.Secrets
-	selected                                                                                     int
-	controls                                                                                     []uintptr
-	layout                                                                                       []controlLayout
-	baseClientWidth, baseClientHeight, minTrackWidth, minTrackHeight                             int32
-	list, status, closeToTray, startup, newButton, saveButton                                    uintptr
-	testButton                                                                                   uintptr
-	authHint                                                                                     uintptr
-	exitButton, cacheButton                                                                      uintptr
-	deleteButton, connectButton, disconnectButton, connectAllButton, disconnectAllButton         uintptr
-	name, protocol, drive, port, host, root, user, volume, key, knownHosts, password, passphrase uintptr
-	keyBrowse, knownHostsBrowse, passwordToggle, passphraseToggle                                uintptr
-	readOnly, autoConnect, remember, insecure                                                    uintptr
-	passwordVisible, passphraseVisible                                                           bool
-	results                                                                                      chan taskResult
-	recoveryItems                                                                                []localcache.RecoveryItem
+	hwnd, font, icon, smallIcon                                                          uintptr
+	scale                                                                                float64
+	hasTray, busy, secretFailed, loading, dirty                                          bool
+	taskbarCreated                                                                       uint32
+	settings                                                                             config.Settings
+	filename                                                                             string
+	manager                                                                              *connection.Manager
+	sessionSecrets                                                                       map[string]config.Secrets
+	selected                                                                             int
+	controls                                                                             []uintptr
+	layout                                                                               []controlLayout
+	baseClientWidth, baseClientHeight, minTrackWidth, minTrackHeight                     int32
+	list, status, closeToTray, startup, newButton, saveButton                            uintptr
+	testButton                                                                           uintptr
+	authHint                                                                             uintptr
+	exitButton, cacheButton                                                              uintptr
+	deleteButton, connectButton, disconnectButton, connectAllButton, disconnectAllButton uintptr
+	name, protocol, drive, port, host, root, user, key, knownHosts, password, passphrase uintptr
+	keyBrowse, knownHostsBrowse, passwordToggle, passphraseToggle                        uintptr
+	readOnly, autoConnect, remember, insecure                                            uintptr
+	passwordVisible, passphraseVisible                                                   bool
+	results                                                                              chan taskResult
+	recoveryItems                                                                        []localcache.RecoveryItem
 }
 
 // Run owns all HWNDs on one OS thread. Network calls never run in WndProc.
@@ -177,7 +178,7 @@ func Run(hidden bool) error {
 		return errors.New("창 클래스 등록 실패")
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(class.Name)), uintptr(instance))
-	title := utf("DKDrive " + app.Version + " — 연결 관리")
+	title := utf("DK-Drive " + app.Version + " — 연결 관리")
 	h, _, createErr := user32.NewProc("CreateWindowExW").Call(0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)), wsOverlappedWindow, 0x80000000, 0x80000000, uintptr(w.px(1150)), uintptr(w.px(680)), 0, 0, uintptr(instance), 0)
 	runtime.KeepAlive(title)
 	if h == 0 {
@@ -358,7 +359,7 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 		case 0x11: // WM_QUERYENDSESSION: never discard live mounts during logoff.
 			if w.busy || w.anyConnected() {
 				w.show()
-				setText(w.status, "Windows 종료 전에 DKDrive에서 모든 드라이브를 해제하고 종료하세요.")
+				setText(w.status, "Windows 종료 전에 DK-Drive에서 모든 드라이브를 해제하고 종료하세요.")
 				return 0
 			}
 			return 1
@@ -448,41 +449,41 @@ func (w *window) build() error {
 	fields := []struct {
 		name   string
 		target *uintptr
-	}{{"호스트", &w.host}, {"원격 시작 경로", &w.root}, {"사용자명", &w.user}, {"볼륨명", &w.volume}, {"SFTP 개인키", &w.key}, {"known_hosts", &w.knownHosts}, {"비밀번호", &w.password}, {"키 Passphrase", &w.passphrase}}
+	}{{"호스트", &w.host}, {"원격 시작 경로", &w.root}, {"사용자명", &w.user}, {"SFTP 개인키", &w.key}, {"known_hosts", &w.knownHosts}, {"비밀번호", &w.password}, {"키 Passphrase", &w.passphrase}}
 	for i, f := range fields {
 		y := 108 + i*34
 		label(f.name, 470, y+2, 115)
 		width := 490
-		if i >= 4 {
+		if i >= 3 {
 			width = 400
 		}
-		*f.target = edit("", 590, y, width, i >= 6)
-		if i == 4 {
+		*f.target = edit("", 590, y, width, i >= 5)
+		if i == 3 {
 			w.keyBrowse = button("찾아보기…", 1000, y-2, 80, idBrowseKey)
 		}
-		if i == 5 {
+		if i == 4 {
 			w.knownHostsBrowse = button("찾아보기…", 1000, y-2, 80, idBrowseKnownHosts)
 		}
-		if i == 6 {
+		if i == 5 {
 			w.passwordToggle = button("보기", 1000, y-2, 80, idTogglePassword)
 		}
-		if i == 7 {
+		if i == 6 {
 			w.passphraseToggle = button("보기", 1000, y-2, 80, idTogglePassphrase)
 		}
 	}
-	w.readOnly = checkbox("읽기 전용", 470, 386, 160, 0)
-	w.autoConnect = checkbox("프로그램 시작 시 자동 연결", 680, 386, 370, 0)
-	w.remember = checkbox("비밀번호·Passphrase 저장 (현재 Windows 사용자용 암호화)", 470, 416, 620, 0)
-	w.insecure = checkbox("TLS 인증서 검증 건너뛰기 (신뢰할 수 있는 테스트 서버 전용)", 470, 446, 620, 0)
-	w.authHint = add("STATIC", "", 0, 470, 481, 620, 22, 0)
-	label("FTP/HTTP는 평문 전송. 강제 해제 시 미저장 데이터가 손실될 수 있습니다.", 470, 505, 620)
+	w.readOnly = checkbox("읽기 전용", 470, 352, 160, 0)
+	w.autoConnect = checkbox("프로그램 시작 시 자동 연결", 680, 352, 370, 0)
+	w.remember = checkbox("비밀번호·Passphrase 저장 (현재 Windows 사용자용 암호화)", 470, 382, 620, 0)
+	w.insecure = checkbox("TLS 인증서 검증 건너뛰기 (신뢰할 수 있는 테스트 서버 전용)", 470, 412, 620, 0)
+	w.authHint = add("STATIC", "", 0, 470, 447, 620, 22, 0)
+	label("FTP/HTTP는 평문 전송. 강제 해제 시 미저장 데이터가 손실될 수 있습니다.", 470, 471, 620)
 	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 520, 300, idCloseToTray)
 	w.startup = checkbox("Windows 로그인 시 실행", 16, 547, 300, idStartup)
 	w.cacheButton = button("보존 캐시", 16, 580, 205, idRecovery)
 	w.exitButton = button("프로그램 종료", 241, 580, 205, idExit)
 	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 470, 540, 610, 70, 0)
 	w.setTabOrder([]uintptr{
-		w.list, w.newButton, w.name, w.drive, w.protocol, w.port, w.host, w.root, w.user, w.volume,
+		w.list, w.newButton, w.name, w.drive, w.protocol, w.port, w.host, w.root, w.user,
 		w.key, w.keyBrowse, w.knownHosts, w.knownHostsBrowse,
 		w.password, w.passwordToggle, w.passphrase, w.passphraseToggle,
 		w.readOnly, w.autoConnect, w.remember, w.insecure,
@@ -558,7 +559,7 @@ func (w *window) handleKeyboardMessage(msg *message) bool {
 
 func (w *window) isTextInput(h uintptr) bool {
 	for _, input := range []uintptr{
-		w.name, w.port, w.host, w.root, w.user, w.volume,
+		w.name, w.port, w.host, w.root, w.user,
 		w.key, w.knownHosts, w.password, w.passphrase,
 	} {
 		if h == input {
@@ -591,7 +592,7 @@ func (w *window) markDirty() {
 
 func (w *window) isProfileInput(h uintptr) bool {
 	for _, input := range []uintptr{
-		w.name, w.drive, w.port, w.host, w.root, w.user, w.volume,
+		w.name, w.drive, w.port, w.host, w.root, w.user,
 		w.key, w.knownHosts, w.password, w.passphrase,
 		w.readOnly, w.autoConnect, w.remember, w.insecure,
 	} {
@@ -971,7 +972,7 @@ func (w *window) newProfile() {
 	w.selected = -1
 	w.secretFailed = false
 	listViewSelect(w.list, -1)
-	for _, h := range []uintptr{w.name, w.host, w.user, w.volume, w.key, w.knownHosts, w.password, w.passphrase} {
+	for _, h := range []uintptr{w.name, w.host, w.user, w.key, w.knownHosts, w.password, w.passphrase} {
 		setText(h, "")
 	}
 	w.refreshDriveOptions("X")
@@ -1041,7 +1042,7 @@ func (w *window) loadEditor(index int) {
 	for _, f := range []struct {
 		h uintptr
 		s string
-	}{{w.name, v.Name}, {w.port, strconv.Itoa(int(v.Port))}, {w.host, v.Host}, {w.root, v.RemotePath}, {w.user, v.Username}, {w.volume, v.VolumeName}, {w.key, v.PrivateKey}, {w.knownHosts, v.KnownHosts}} {
+	}{{w.name, v.Name}, {w.port, strconv.Itoa(int(v.Port))}, {w.host, v.Host}, {w.root, v.RemotePath}, {w.user, v.Username}, {w.key, v.PrivateKey}, {w.knownHosts, v.KnownHosts}} {
 		setText(f.h, f.s)
 	}
 	send(w.protocol, cbSetCurSel, uintptr(protocolIndex(v)), 0)
@@ -1068,7 +1069,8 @@ func (w *window) readEditor() (config.Profile, config.Secrets, error) {
 	if err != nil || port == 0 {
 		return config.Profile{}, config.Secrets{}, errors.New("포트는 1~65535여야 합니다")
 	}
-	p := config.Profile{Name: strings.TrimSpace(getText(w.name)), DriveLetter: normalizedDriveLetter(getText(w.drive)), Port: uint16(port), Host: strings.TrimSpace(getText(w.host)), RemotePath: getText(w.root), Username: getText(w.user), VolumeName: getText(w.volume), ReadOnly: checked(w.readOnly), AutoConnect: checked(w.autoConnect), AutoReconnect: true, AuthMethod: config.AuthPassword, InsecureSkipTLSVerify: checked(w.insecure)}
+	name := strings.TrimSpace(getText(w.name))
+	p := config.Profile{Name: name, DriveLetter: normalizedDriveLetter(getText(w.drive)), Port: uint16(port), Host: strings.TrimSpace(getText(w.host)), RemotePath: getText(w.root), Username: getText(w.user), VolumeName: name, ReadOnly: checked(w.readOnly), AutoConnect: checked(w.autoConnect), AutoReconnect: true, AuthMethod: config.AuthPassword, InsecureSkipTLSVerify: checked(w.insecure)}
 	switch int(send(w.protocol, cbGetCurSel, 0, 0)) {
 	case 0:
 		p.Protocol = config.ProtocolSFTP
@@ -1330,6 +1332,34 @@ func (w *window) refreshRecoveryItems() error {
 	return nil
 }
 
+func (w *window) clearCache() {
+	if w.anyConnected() {
+		w.report(errors.New("연결된 드라이브가 있으면 캐시를 정리할 수 없습니다. 모든 드라이브를 먼저 해제하세요"))
+		return
+	}
+	if box(w.hwnd, "캐시 폴더의 모든 파일을 삭제할까요?\n\n보존된 복구 파일과 메타데이터가 모두 영구 삭제되며 되돌릴 수 없습니다.", 0x134) != 6 {
+		return
+	}
+	store, err := localcache.New("")
+	if err != nil {
+		w.report(err)
+		return
+	}
+	removed := 0
+	w.task(func() error {
+		var clearErr error
+		removed, clearErr = store.Clear()
+		return clearErr
+	}, func(clearErr error) {
+		scanErr := w.refreshRecoveryItems()
+		if err := errors.Join(clearErr, scanErr); err != nil {
+			w.report(err)
+			return
+		}
+		setText(w.status, fmt.Sprintf("캐시 정리 완료: %d개 항목 삭제", removed))
+	})
+}
+
 func (w *window) handleListNotification(value uintptr) bool {
 	if value == 0 {
 		return false
@@ -1448,6 +1478,8 @@ func (w *window) command(id, notice int, control uintptr) {
 		if err != nil {
 			w.report(err)
 		}
+	case idClearCache:
+		w.clearCache()
 	case idExit:
 		w.exit()
 	case idProtocol:

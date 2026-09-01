@@ -169,12 +169,12 @@ $WebDAVSkipTLSVerify = $true
 다른 PowerShell 창에서 한글과 공백을 포함한 기본 파일 작업을 검증한다.
 
 ```powershell
-$TestDir = 'X:\DKDrive WebDAV 마운트 테스트'
+$TestDir = 'X:\DK-Drive WebDAV 마운트 테스트'
 $TestFile = "$TestDir\한글 파일.txt"
-$MovedFile = 'X:\DKDrive WebDAV 이동 테스트.txt'
+$MovedFile = 'X:\DK-Drive WebDAV 이동 테스트.txt'
 
 New-Item $TestDir -ItemType Directory -ErrorAction Stop | Out-Null
-Set-Content $TestFile 'DKDrive WebDAV 테스트' -Encoding UTF8 -ErrorAction Stop
+Set-Content $TestFile 'DK-Drive WebDAV 테스트' -Encoding UTF8 -ErrorAction Stop
 Get-Content $TestFile -Encoding UTF8 -ErrorAction Stop
 Rename-Item $TestFile '이름 변경.txt' -ErrorAction Stop
 Move-Item "$TestDir\이름 변경.txt" $MovedFile -ErrorAction Stop

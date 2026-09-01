@@ -36,7 +36,7 @@ func Mount(ctx context.Context, profileID string, p config.Profile, secret confi
 		return nil, err
 	}
 	s, err := mount.StartSession(backend, mount.Options{
-		DriveLetter: letter, VolumeName: p.VolumeName, ReadOnly: p.ReadOnly,
+		DriveLetter: letter, VolumeName: p.Name, ReadOnly: p.ReadOnly,
 		ProfileID: profileID, ProfileName: p.Name, Protocol: string(p.Protocol), RemotePath: p.RemotePath,
 	}, p.Protocol == config.ProtocolSFTP)
 	if err != nil {

@@ -96,6 +96,36 @@ func (store *Store) Directory() string {
 	return store.directory
 }
 
+// Clear removes every cache entry while preserving the cache directory itself.
+// Callers must ensure that no active mount is using the store.
+func (store *Store) Clear() (int, error) {
+	info, err := os.Lstat(store.directory)
+	if err != nil {
+		return 0, fmt.Errorf("캐시 폴더 확인 실패: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return 0, fmt.Errorf("캐시 경로가 안전한 일반 폴더가 아닙니다: %s", store.directory)
+	}
+	entries, err := os.ReadDir(store.directory)
+	if err != nil {
+		return 0, fmt.Errorf("캐시 폴더 읽기 실패: %w", err)
+	}
+	removed := 0
+	var result error
+	for _, entry := range entries {
+		target := filepath.Join(store.directory, entry.Name())
+		if err := os.RemoveAll(target); err != nil {
+			result = errors.Join(result, fmt.Errorf("%s: %w", entry.Name(), err))
+			continue
+		}
+		removed++
+	}
+	if result != nil {
+		return removed, fmt.Errorf("일부 캐시 항목을 삭제하지 못했습니다: %w", result)
+	}
+	return removed, nil
+}
+
 func (store *Store) CreateStaging() (*os.File, error) {
 	file, err := os.CreateTemp(store.directory, stagingPattern)
 	if err != nil {

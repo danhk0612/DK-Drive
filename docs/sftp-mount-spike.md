@@ -54,14 +54,14 @@ go build -o bin/dkdrive-sftp-mount.exe ./cmd/dkdrive-sftp-mount
 마운트 후 별도 PowerShell 창에서 다음과 같이 격리된 폴더를 사용한다.
 
 ```powershell
-New-Item 'X:\DKDrive 마운트 테스트' -ItemType Directory
-Set-Content 'X:\DKDrive 마운트 테스트\hello world.txt' 'DKDrive 테스트'
-Get-Content 'X:\DKDrive 마운트 테스트\hello world.txt'
-Rename-Item 'X:\DKDrive 마운트 테스트\hello world.txt' '이름 변경.txt'
-Move-Item 'X:\DKDrive 마운트 테스트\이름 변경.txt' 'X:\이동 테스트.txt'
+New-Item 'X:\DK-Drive 마운트 테스트' -ItemType Directory
+Set-Content 'X:\DK-Drive 마운트 테스트\hello world.txt' 'DK-Drive 테스트'
+Get-Content 'X:\DK-Drive 마운트 테스트\hello world.txt'
+Rename-Item 'X:\DK-Drive 마운트 테스트\hello world.txt' '이름 변경.txt'
+Move-Item 'X:\DK-Drive 마운트 테스트\이름 변경.txt' 'X:\이동 테스트.txt'
 Get-Content 'X:\이동 테스트.txt'
 Remove-Item 'X:\이동 테스트.txt'
-Remove-Item 'X:\DKDrive 마운트 테스트'
+Remove-Item 'X:\DK-Drive 마운트 테스트'
 ```
 
 Windows 탐색기에서도 폴더 목록, 파일 생성, 메모장 저장, 이름 변경, 이동,
@@ -69,7 +69,7 @@ Windows 탐색기에서도 폴더 목록, 파일 생성, 메모장 저장, 이�
 
 ## 현재 제한 사항
 
-- 열린 파일은 DKDrive 캐시 폴더에 준비한 뒤 WinFsp `Flush` 또는 파일 닫기
+- 열린 파일은 DK-Drive 캐시 폴더에 준비한 뒤 WinFsp `Flush` 또는 파일 닫기
   시점에 SFTP로 반영한다.
 - 반영 실패 시 데이터 보존을 위해 임시 파일을 삭제하지 않지만 복구 UI는
   아직 없다.

@@ -110,12 +110,12 @@ type lockTestBackend interface {
 }
 
 func runLockTest(ctx context.Context, backend lockTestBackend) error {
-	name := "DKDrive WebDAV 잠금 테스트 " + time.Now().Format("20060102-150405") + ".txt"
+	name := "DK-Drive WebDAV 잠금 테스트 " + time.Now().Format("20060102-150405") + ".txt"
 	handle, err := backend.OpenWrite(ctx, name, vfs.WriteOptions{Create: true, Truncate: true, Mode: 0o644})
 	if err != nil {
 		return fmt.Errorf("잠금 테스트 파일 생성: %w", err)
 	}
-	if _, err := handle.WriteAt([]byte("DKDrive WebDAV LOCK 검증\n"), 0); err != nil {
+	if _, err := handle.WriteAt([]byte("DK-Drive WebDAV LOCK 검증\n"), 0); err != nil {
 		handle.Close()
 		return fmt.Errorf("잠금 테스트 파일 쓰기: %w", err)
 	}
@@ -153,11 +153,11 @@ type writeTestBackend interface {
 }
 
 func runWriteTest(ctx context.Context, backend writeTestBackend) error {
-	root := "DKDrive WebDAV 쓰기 테스트 " + time.Now().Format("20060102-150405")
+	root := "DK-Drive WebDAV 쓰기 테스트 " + time.Now().Format("20060102-150405")
 	subdirectory := path.Join(root, "이동 대상")
 	original := path.Join(root, "원본 파일.txt")
 	moved := path.Join(subdirectory, "이름 변경 파일.txt")
-	data := []byte("DKDrive WebDAV 쓰기 검증\n")
+	data := []byte("DK-Drive WebDAV 쓰기 검증\n")
 
 	fmt.Printf("임시 테스트 경로 생성: %s\n", root)
 	if err := backend.Mkdir(ctx, root); err != nil {

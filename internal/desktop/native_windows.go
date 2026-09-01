@@ -254,7 +254,7 @@ func check(h uintptr, value bool) {
 }
 func alert(h uintptr, text string) { box(h, text, 0x10) }
 func box(h uintptr, text string, flags uintptr) uintptr {
-	p, t := utf(text), utf("DKDrive")
+	p, t := utf(text), utf("DK-Drive")
 	r := call("MessageBoxW", h, uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(t)), flags)
 	runtime.KeepAlive(p)
 	runtime.KeepAlive(t)
@@ -391,7 +391,7 @@ func createAppIcon(instance uintptr, size int) (uintptr, error) {
 	runtime.KeepAlive(andBits)
 	runtime.KeepAlive(xorBits)
 	if h == 0 {
-		return 0, fmt.Errorf("DKDrive 아이콘 생성 실패: %w", err)
+		return 0, fmt.Errorf("DK-Drive 아이콘 생성 실패: %w", err)
 	}
 	return h, nil
 }
@@ -414,7 +414,7 @@ func (w *window) createControl(class, text string, style uintptr, x, y, width, h
 func (w *window) tray(add bool) bool {
 	n := notifyIcon{Window: w.hwnd, ID: 1, Flags: 1 | 2 | 4, Callback: wmTray, Icon: w.icon}
 	n.Size = uint32(unsafe.Sizeof(n))
-	copy(n.Tip[:], windows.StringToUTF16("DKDrive — 드라이브 관리"))
+	copy(n.Tip[:], windows.StringToUTF16("DK-Drive — 드라이브 관리"))
 	op := uintptr(2)
 	if add {
 		op = 0
@@ -458,14 +458,15 @@ func (w *window) trayMenu() {
 	if len(w.settings.Profiles) == 0 {
 		add(drives, 0x1, 0, "(등록된 드라이브 없음)")
 	}
+	add(drives, 0x800, 0, "")
+	add(drives, 0, idNew, "드라이브 추가")
+	add(drives, 0, idConnectAll, "모든 드라이브 연결")
+	add(drives, 0, idDisconnectAll, "모든 드라이브 해제")
 	add(cacheMenu, 0, idOpenCacheFolder, "캐시 폴더 열기")
-	add(cacheMenu, 0, idRecovery, "캐시 정리")
+	add(cacheMenu, 0, idClearCache, "캐시 정리")
 
-	add(menu, 0, idShow, "창 열기 / 설정")
+	add(menu, 0, idShow, "DK-Drive 실행")
 	add(menu, 0x10, drives, "드라이브")
-	add(menu, 0, idNew, "드라이브 추가")
-	add(menu, 0, idConnectAll, "모든 드라이브 연결")
-	add(menu, 0, idDisconnectAll, "모든 드라이브 해제")
 	add(menu, 0x10, cacheMenu, "캐시 관리")
 	add(menu, 0, idExit, "종료")
 	var pos point

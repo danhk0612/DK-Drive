@@ -99,7 +99,7 @@ func main() {
 	}
 	defer filesystem.Unmount()
 
-	fmt.Printf("DKDrive FTP/FTPS 파일시스템을 %s에 %s로 마운트했습니다. 캐시: %s. 종료하려면 Ctrl+C를 누르세요.\n", letter, modeDescription, cacheStore.Directory())
+	fmt.Printf("DK-Drive FTP/FTPS 파일시스템을 %s에 %s로 마운트했습니다. 캐시: %s. 종료하려면 Ctrl+C를 누르세요.\n", letter, modeDescription, cacheStore.Directory())
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 	<-interrupt

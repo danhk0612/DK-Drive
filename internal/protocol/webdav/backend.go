@@ -37,7 +37,7 @@ const lockBody = `<?xml version="1.0" encoding="utf-8"?>
 <d:lockinfo xmlns:d="DAV:">
   <d:lockscope><d:exclusive/></d:lockscope>
   <d:locktype><d:write/></d:locktype>
-  <d:owner><d:href>DKDrive</d:href></d:owner>
+  <d:owner><d:href>DK-Drive</d:href></d:owner>
 </d:lockinfo>`
 
 type Config struct {
@@ -145,7 +145,7 @@ func (backend *Backend) newRequest(ctx context.Context, method string, resource 
 		return nil, err
 	}
 	request.SetBasicAuth(backend.username, backend.password)
-	request.Header.Set("User-Agent", "DKDrive/0.3")
+	request.Header.Set("User-Agent", "DK-Drive/0.3")
 	return request, nil
 }
 

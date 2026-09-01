@@ -62,7 +62,7 @@ func showRecoveryDialog(owner *window) error {
 		return errors.New("복구 창 클래스 등록 실패")
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(class.Name)), uintptr(instance))
-	title := utf("DKDrive — 보존 캐시 복구")
+	title := utf("DK-Drive — 보존 캐시 복구")
 	h, _, createErr := user32.NewProc("CreateWindowExW").Call(
 		0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)),
 		wsOverlappedWindow, 0x80000000, 0x80000000,
@@ -294,7 +294,7 @@ func formatByteSize(size int64) string {
 func recoverySuggestedName(item localcache.RecoveryItem) string {
 	name := path.Base(strings.ReplaceAll(item.Metadata.RemotePath, "\\", "/"))
 	if name == "." || name == "/" || name == "" {
-		name = "DKDrive 복구 파일.bin"
+		name = "DK-Drive 복구 파일.bin"
 	}
 	name = strings.Map(func(r rune) rune {
 		if strings.ContainsRune(`<>:"/\|?*`, r) || r < 32 {
@@ -304,7 +304,7 @@ func recoverySuggestedName(item localcache.RecoveryItem) string {
 	}, name)
 	name = strings.TrimRight(name, ". ")
 	if name == "" {
-		return "DKDrive 복구 파일.bin"
+		return "DK-Drive 복구 파일.bin"
 	}
 	return name
 }

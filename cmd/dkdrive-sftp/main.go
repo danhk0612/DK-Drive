@@ -134,11 +134,11 @@ type writeTestBackend interface {
 }
 
 func runWriteTest(ctx context.Context, backend writeTestBackend) error {
-	root := "DKDrive 쓰기 테스트 " + time.Now().Format("20060102-150405")
+	root := "DK-Drive 쓰기 테스트 " + time.Now().Format("20060102-150405")
 	subdirectory := path.Join(root, "이동 대상")
 	original := path.Join(root, "원본 파일.txt")
 	moved := path.Join(subdirectory, "이름 변경 파일.txt")
-	data := []byte("DKDrive SFTP 쓰기 검증\n")
+	data := []byte("DK-Drive SFTP 쓰기 검증\n")
 
 	fmt.Printf("임시 테스트 경로 생성: %s\n", root)
 	if err := backend.Mkdir(ctx, root); err != nil {

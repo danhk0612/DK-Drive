@@ -294,3 +294,44 @@ func TestExportRejectsCacheDestinationAndUnavailableState(t *testing.T) {
 		t.Fatalf("source changed: %q, %v", got, err)
 	}
 }
+
+func TestClearRemovesAllEntriesAndKeepsDirectory(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(filepath.Join(root, "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Directory(), "staging-file"), []byte("cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(store.Directory(), "nested")
+	if err := os.Mkdir(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "metadata.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside.txt")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(store.Directory(), "outside-link")); err != nil {
+		t.Logf("symlink unavailable: %v", err)
+	}
+
+	removed, err := store.Clear()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(store.Directory())
+	if err != nil {
+		t.Fatalf("cache directory removed: %v", err)
+	}
+	if len(entries) != 0 || removed < 2 {
+		t.Fatalf("removed=%d entries=%v", removed, entries)
+	}
+	data, err := os.ReadFile(outside)
+	if err != nil || string(data) != "keep" {
+		t.Fatalf("outside file changed: %q, %v", data, err)
+	}
+}

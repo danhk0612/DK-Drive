@@ -34,7 +34,7 @@ func main() {
 	}
 	defer filesystem.Unmount()
 
-	fmt.Printf("DKDrive 메모리 파일시스템을 %s에 마운트했습니다. 종료하려면 Ctrl+C를 누르세요.\n", strings.ToUpper(*mountpoint))
+	fmt.Printf("DK-Drive 메모리 파일시스템을 %s에 마운트했습니다. 종료하려면 Ctrl+C를 누르세요.\n", strings.ToUpper(*mountpoint))
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)

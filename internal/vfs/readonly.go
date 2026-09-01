@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var ErrReadOnly = fmt.Errorf("DKDrive 읽기 전용 연결: %w", fs.ErrPermission)
+var ErrReadOnly = fmt.Errorf("DK-Drive 읽기 전용 연결: %w", fs.ErrPermission)
 
 type readOnlyBackend struct {
 	backend Backend

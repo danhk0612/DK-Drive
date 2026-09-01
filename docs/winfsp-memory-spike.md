@@ -42,7 +42,7 @@ go build -o bin/dkdrive-memfs.exe ./cmd/dkdrive-memfs
 - 메모장에서 새 파일 저장과 기존 파일 덮어쓰기가 동작한다.
 - 한글과 공백 포함 파일명이 손상되지 않는다.
 
-이 검증이 끝나면 같은 마운트 경계에 DKDrive의 SFTP 백엔드를 연결한다.
+이 검증이 끝나면 같은 마운트 경계에 DK-Drive의 SFTP 백엔드를 연결한다.
 
 ## 검증 결과
 
