@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-func Mount(ctx context.Context, p config.Profile, secret config.Secrets) (Session, error) {
+func Mount(ctx context.Context, profileID string, p config.Profile, secret config.Secrets) (Session, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
@@ -35,7 +35,10 @@ func Mount(ctx context.Context, p config.Profile, secret config.Secrets) (Sessio
 		backend.Close()
 		return nil, err
 	}
-	s, err := mount.StartSession(backend, mount.Options{DriveLetter: letter, VolumeName: p.VolumeName, ReadOnly: p.ReadOnly}, p.Protocol == config.ProtocolSFTP)
+	s, err := mount.StartSession(backend, mount.Options{
+		DriveLetter: letter, VolumeName: p.VolumeName, ReadOnly: p.ReadOnly,
+		ProfileID: profileID, ProfileName: p.Name, Protocol: string(p.Protocol), RemotePath: p.RemotePath,
+	}, p.Protocol == config.ProtocolSFTP)
 	if err != nil {
 		backend.Close()
 		return nil, err

@@ -113,6 +113,21 @@ Windows 로그인 시 실행은 사용자가 선택한 경우에만 HKCU Run의 
 프로그램을 유지한다. OS 로그오프 처리에는 강제 해제 확인을 추가하지 않았으며,
 OS 강제 종료·전원 차단에 대한 보장은 하지 않는다.
 
+## ADR-006: 보존 캐시와 복구 메타데이터
+
+- 상태: 첫 구현
+- 날짜: 2026-09-01
+
+업로드 실패 또는 사용자 승인 강제 해제로 스테이징 파일을 남길 때 같은 캐시
+폴더에 버전이 있는 JSON 메타데이터를 원자적으로 기록한다. 프로필 ID·표시 이름·
+프로토콜, 원격·로컬 경로, 크기·시각, 보존 사유와 마지막 오류만 기록하며 비밀번호,
+Passphrase, 개인키 내용과 인증 헤더는 기록하지 않는다.
+
+시작 시 캐시를 읽기 전용으로 검사해 정상 보존 항목, 기존 메타데이터 없는
+`staging-*`, 파일 없는 메타데이터와 손상·조작된 메타데이터를 구분한다. 캐시 루트
+밖의 경로와 심볼릭 링크는 복구 대상으로 신뢰하지 않는다. 이 단계에서는 항목을
+자동 삭제하거나 원격 서버에 자동 재전송하지 않는다.
+
 참고: [Win32 창 생성](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowexw),
 [Shell 알림 아이콘](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyiconw),
 [DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata),

@@ -140,7 +140,11 @@ func TestStagingFilePreservedAfterUploadFailure(t *testing.T) {
 		t.Fatalf("cache.New(): %v", err)
 	}
 	wantErr := errors.New("upload failed")
-	filesystem := NewGoFileSystem(&stagingBackend{openWriteErr: wantErr}, false, store)
+	filesystem := newGoFileSystem(&stagingBackend{openWriteErr: wantErr}, false, store)
+	filesystem.recovery = RecoveryContext{
+		ProfileID: "profile-1", ProfileName: "NAS 연결",
+		Protocol: "sftp", RemotePath: "/home/",
+	}
 	file, err := filesystem.OpenFile("new.txt", os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatalf("OpenFile(): %v", err)
@@ -151,7 +155,18 @@ func TestStagingFilePreservedAfterUploadFailure(t *testing.T) {
 	if err := file.Close(); !errors.Is(err, wantErr) {
 		t.Fatalf("Close() error = %v, want %v", err, wantErr)
 	}
-	assertCacheEntryCount(t, store.Directory(), 1)
+	assertCacheEntryCount(t, store.Directory(), 2)
+	items, err := store.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("recovery items = %+v", items)
+	}
+	metadata := items[0].Metadata
+	if metadata.ProfileID != "profile-1" || metadata.ProfileName != "NAS 연결" || metadata.Protocol != "sftp" || metadata.RemotePath != "/home/new.txt" || metadata.Reason != localcache.ReasonUploadFailed || metadata.LastError == "" || metadata.RecoveryState != localcache.StatePreserved {
+		t.Fatalf("recovery metadata = %+v", metadata)
+	}
 }
 
 func assertCacheEntryCount(t *testing.T, directory string, want int) {
@@ -228,5 +243,18 @@ func (discardWriteHandle) Close() error {
 func TestReadOnlyGoFileSystemUsesVFSReadOnlyError(t *testing.T) {
 	if !errors.Is(vfs.ErrReadOnly, fs.ErrPermission) {
 		t.Fatalf("ErrReadOnly = %v, want fs.ErrPermission", vfs.ErrReadOnly)
+	}
+}
+
+func TestRecoveryRemotePathIncludesProfileRoot(t *testing.T) {
+	for _, test := range []struct {
+		root, name, want string
+	}{
+		{"/home/", "folder/file.txt", "/home/folder/file.txt"},
+		{"/", `folder\한글.txt`, "/folder/한글.txt"},
+	} {
+		if got := recoveryRemotePath(test.root, test.name); got != test.want {
+			t.Errorf("recoveryRemotePath(%q, %q) = %q, want %q", test.root, test.name, got, test.want)
+		}
 	}
 }

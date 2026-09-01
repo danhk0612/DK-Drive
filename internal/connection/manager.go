@@ -11,7 +11,7 @@ import (
 )
 
 type Session interface{ Close() error }
-type Factory func(context.Context, config.Profile, config.Secrets) (Session, error)
+type Factory func(context.Context, string, config.Profile, config.Secrets) (Session, error)
 
 type entry struct {
 	drive   string
@@ -58,7 +58,7 @@ func (m *Manager) Connect(ctx context.Context, id string, p config.Profile, secr
 	e := &entry{drive: drive, state: "연결 중"}
 	m.entries[id] = e
 	m.mu.Unlock()
-	s, err := m.factory(ctx, p, secret)
+	s, err := m.factory(ctx, id, p, secret)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err != nil {

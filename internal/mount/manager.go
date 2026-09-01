@@ -13,6 +13,10 @@ type Options struct {
 	DriveLetter string
 	VolumeName  string
 	ReadOnly    bool
+	ProfileID   string
+	ProfileName string
+	Protocol    string
+	RemotePath  string
 }
 
 type Manager interface {

@@ -23,7 +23,7 @@ func (s *disconnectSession) ForceClose() (string, error) {
 
 func disconnectFixture(t *testing.T, sessions ...*disconnectSession) (*connection.Manager, []config.SavedProfile) {
 	t.Helper()
-	m := connection.New(func(_ context.Context, p config.Profile, _ config.Secrets) (connection.Session, error) {
+	m := connection.New(func(_ context.Context, _ string, p config.Profile, _ config.Secrets) (connection.Session, error) {
 		return sessions[int(p.DriveLetter[0]-'X')], nil
 	})
 	var profiles []config.SavedProfile

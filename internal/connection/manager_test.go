@@ -22,7 +22,7 @@ func profile(letter string) config.Profile {
 func TestManagerMultipleConnectionsAndCloseFailure(t *testing.T) {
 	busy := errors.New("open handles")
 	x, y := &fakeSession{err: busy}, &fakeSession{}
-	m := New(func(_ context.Context, p config.Profile, _ config.Secrets) (Session, error) {
+	m := New(func(_ context.Context, _ string, p config.Profile, _ config.Secrets) (Session, error) {
 		if p.DriveLetter == "X" {
 			return x, nil
 		}
@@ -57,7 +57,7 @@ func TestManagerMultipleConnectionsAndCloseFailure(t *testing.T) {
 
 func TestManagerReservesDriveWhileConnecting(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
-	m := New(func(context.Context, config.Profile, config.Secrets) (Session, error) {
+	m := New(func(context.Context, string, config.Profile, config.Secrets) (Session, error) {
 		close(entered)
 		<-release
 		return &fakeSession{}, nil
@@ -88,7 +88,7 @@ func TestManagerReservesDriveWhileConnecting(t *testing.T) {
 
 func TestManagerConnectFailureAllowsRetry(t *testing.T) {
 	calls := 0
-	m := New(func(context.Context, config.Profile, config.Secrets) (Session, error) {
+	m := New(func(context.Context, string, config.Profile, config.Secrets) (Session, error) {
 		calls++
 		if calls == 1 {
 			return nil, context.DeadlineExceeded
@@ -106,9 +106,23 @@ func TestManagerConnectFailureAllowsRetry(t *testing.T) {
 	}
 }
 
+func TestManagerPassesProfileIDToFactory(t *testing.T) {
+	var got string
+	m := New(func(_ context.Context, id string, _ config.Profile, _ config.Secrets) (Session, error) {
+		got = id
+		return &fakeSession{}, nil
+	})
+	if err := m.Connect(context.Background(), "profile-id", profile("X"), config.Secrets{}); err != nil {
+		t.Fatal(err)
+	}
+	if got != "profile-id" {
+		t.Fatalf("factory profile ID = %q", got)
+	}
+}
+
 func TestManagerForceUnsupportedKeepsReservation(t *testing.T) {
 	s := &fakeSession{}
-	m := New(func(context.Context, config.Profile, config.Secrets) (Session, error) { return s, nil })
+	m := New(func(context.Context, string, config.Profile, config.Secrets) (Session, error) { return s, nil })
 	if err := m.Connect(context.Background(), "id", profile("X"), config.Secrets{}); err != nil {
 		t.Fatal(err)
 	}

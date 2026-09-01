@@ -91,6 +91,10 @@ func TestSessionGuardRetainsFailedUpload(t *testing.T) {
 
 func TestForceStopPreservesPendingWriteWithoutUpload(t *testing.T) {
 	raw, backend := visibilityFixture(t)
+	raw.recovery = RecoveryContext{
+		ProfileID: "profile-2", ProfileName: "WebDAV 연결",
+		Protocol: "webdav", RemotePath: "/home/",
+	}
 	g := &guardedFS{FileSystem: raw, cache: raw.cacheStore.Directory()}
 	f, err := g.OpenFile("pending.txt", os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
@@ -133,6 +137,13 @@ func TestForceStopPreservesPendingWriteWithoutUpload(t *testing.T) {
 	}
 	if _, err := os.Stat(staged.temporaryPath); err != nil {
 		t.Fatal("duplicate close removed staging", err)
+	}
+	items, err := raw.cacheStore.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Metadata.ProfileID != "profile-2" || items[0].Metadata.RemotePath != "/home/pending.txt" || items[0].Metadata.Reason != "force_disconnect" {
+		t.Fatalf("force recovery metadata = %+v", items)
 	}
 }
 

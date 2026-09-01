@@ -35,6 +35,10 @@ func StartSession(backend vfs.Backend, options Options, metadata bool) (*Session
 		mode = gofs.AttribReadOnlyAlways
 	}
 	raw := newGoFileSystem(delegate, options.ReadOnly, store)
+	raw.recovery = RecoveryContext{
+		ProfileID: options.ProfileID, ProfileName: options.ProfileName,
+		Protocol: options.Protocol, RemotePath: options.RemotePath,
+	}
 	guard := &guardedFS{FileSystem: raw, cache: store.Directory()}
 	base, err := gofs.NewOptions(guard, gofs.WithCaseInsensitive(false), gofs.WithAttribReadOnlyTransMode(mode))
 	if err != nil {

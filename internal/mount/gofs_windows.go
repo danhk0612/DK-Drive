@@ -35,7 +35,15 @@ type goFileSystem struct {
 	backend    vfs.Backend
 	readOnly   bool
 	cacheStore *localcache.Store
+	recovery   RecoveryContext
 	openFiles  sync.Map
+}
+
+type RecoveryContext struct {
+	ProfileID   string
+	ProfileName string
+	Protocol    string
+	RemotePath  string
 }
 
 func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode) (gofs.File, error) {
@@ -102,6 +110,7 @@ func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode
 		modTime:        entry.ModTime,
 		dirty:          dirty,
 		writePermitted: flag&(os.O_WRONLY|os.O_RDWR) != 0,
+		createdAt:      time.Now().UTC(),
 	}
 	filesystem.openFiles.Store(file, struct{}{})
 	return file, nil
@@ -261,6 +270,7 @@ type stagedFile struct {
 	dirty          bool
 	writePermitted bool
 	requestedTime  time.Time
+	createdAt      time.Time
 	closed         bool
 	mutex          sync.Mutex
 }
@@ -355,7 +365,8 @@ func (file *stagedFile) Close() error {
 	if syncErr == nil {
 		return errors.Join(closeErr, os.Remove(file.temporaryPath))
 	}
-	return errors.Join(syncErr, closeErr)
+	preserveErr := file.preserveLocked(localcache.ReasonUploadFailed, syncErr)
+	return errors.Join(syncErr, closeErr, preserveErr)
 }
 
 // closePreserving seals a GUI handle without publishing or deleting staging.
@@ -371,7 +382,20 @@ func (file *stagedFile) closePreserving() error {
 	file.closed = true
 	closeErr := file.File.Close()
 	file.filesystem.openFiles.Delete(file)
-	return errors.Join(syncErr, closeErr)
+	preserveCause := errors.Join(syncErr, closeErr)
+	preserveErr := file.preserveLocked(localcache.ReasonForceDisconnect, preserveCause)
+	return errors.Join(preserveCause, preserveErr)
+}
+
+func (file *stagedFile) preserveLocked(reason string, cause error) error {
+	recovery := file.filesystem.recovery
+	_, err := file.filesystem.cacheStore.Preserve(localcache.Preservation{
+		ProfileID: recovery.ProfileID, ProfileName: recovery.ProfileName,
+		Protocol: recovery.Protocol, RemotePath: recoveryRemotePath(recovery.RemotePath, file.name),
+		StagingPath: file.temporaryPath, CreatedAt: file.createdAt,
+		Reason: reason, LastError: cause,
+	})
+	return err
 }
 
 func (file *stagedFile) setModTime(modTime time.Time) error {
@@ -511,6 +535,10 @@ func cleanMountPath(name string) string {
 		return "."
 	}
 	return name
+}
+
+func recoveryRemotePath(root, name string) string {
+	return path.Join("/", strings.TrimPrefix(root, "/"), cleanMountPath(name))
 }
 
 func operationContext() (context.Context, context.CancelFunc) {

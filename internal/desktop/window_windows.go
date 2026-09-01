@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/danhk0612/DK-Drive/internal/app"
+	localcache "github.com/danhk0612/DK-Drive/internal/cache"
 	"github.com/danhk0612/DK-Drive/internal/config"
 	"github.com/danhk0612/DK-Drive/internal/connection"
 	"github.com/danhk0612/DK-Drive/internal/credential"
@@ -99,6 +100,7 @@ type window struct {
 	readOnly, autoConnect, remember, insecure                                                    uintptr
 	passwordVisible, passphraseVisible                                                           bool
 	results                                                                                      chan taskResult
+	recoveryItems                                                                                []localcache.RecoveryItem
 }
 
 // Run owns all HWNDs on one OS thread. Network calls never run in WndProc.
@@ -130,7 +132,15 @@ func Run(hidden bool) error {
 	if err != nil {
 		return err
 	}
-	w := &window{settings: s, filename: filename, manager: connection.New(connection.Mount), selected: -1, sessionSecrets: map[string]config.Secrets{}, results: make(chan taskResult, 1)}
+	cacheStore, err := localcache.New("")
+	if err != nil {
+		return err
+	}
+	recoveryItems, err := cacheStore.Scan()
+	if err != nil {
+		return err
+	}
+	w := &window{settings: s, filename: filename, manager: connection.New(connection.Mount), selected: -1, sessionSecrets: map[string]config.Secrets{}, results: make(chan taskResult, 1), recoveryItems: recoveryItems}
 	active = w
 	defer func() { active = nil }()
 	call("SetProcessDPIAware")
