@@ -295,6 +295,126 @@ func TestExportRejectsCacheDestinationAndUnavailableState(t *testing.T) {
 	}
 }
 
+func TestDeleteRecoveryItems(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(filepath.Join(root, "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	preservedFile, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preservedFile.WriteString("preserved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := preservedFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	preserved, err := store.Preserve(Preservation{StagingPath: preservedFile.Name(), RemotePath: "/preserved.txt", Reason: ReasonUploadFailed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete(preserved); err != nil {
+		t.Fatal(err)
+	}
+	for _, filename := range []string{preserved.Metadata.StagingPath, preserved.MetadataPath} {
+		if _, err := os.Lstat(filename); !os.IsNotExist(err) {
+			t.Fatalf("preserved item remained: %s: %v", filename, err)
+		}
+	}
+
+	missingMetadata, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := missingMetadata.Close(); err != nil {
+		t.Fatal(err)
+	}
+	item := RecoveryItem{Metadata: RecoveryMetadata{StagingPath: missingMetadata.Name(), RecoveryState: StateMissingMetadata}}
+	if err := store.Delete(item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(missingMetadata.Name()); !os.IsNotExist(err) {
+		t.Fatalf("metadata-less staging remained: %v", err)
+	}
+
+	missingStagingPath := filepath.Join(store.Directory(), "staging-missing")
+	metadataPath := missingStagingPath + metadataSuffix
+	if err := os.WriteFile(metadataPath, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item = RecoveryItem{
+		Metadata:     RecoveryMetadata{StagingPath: missingStagingPath, RecoveryState: StateMissingStaging},
+		MetadataPath: metadataPath,
+	}
+	if err := store.Delete(item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(metadataPath); !os.IsNotExist(err) {
+		t.Fatalf("orphan metadata remained: %v", err)
+	}
+}
+
+func TestDeleteRejectsUnsafeRecoveryPaths(t *testing.T) {
+	root := t.TempDir()
+	store, err := New(filepath.Join(root, "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside.txt")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item := RecoveryItem{Metadata: RecoveryMetadata{StagingPath: outside, RecoveryState: StateMissingMetadata}}
+	if err := store.Delete(item); err == nil {
+		t.Fatal("outside staging deletion accepted")
+	}
+
+	staging, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := staging.Close(); err != nil {
+		t.Fatal(err)
+	}
+	item = RecoveryItem{
+		Metadata:     RecoveryMetadata{StagingPath: staging.Name(), RecoveryState: StatePreserved},
+		MetadataPath: filepath.Join(store.Directory(), "staging-other") + metadataSuffix,
+	}
+	if err := store.Delete(item); err == nil {
+		t.Fatal("mismatched metadata deletion accepted")
+	}
+	directory := filepath.Join(store.Directory(), "staging-directory")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	item = RecoveryItem{Metadata: RecoveryMetadata{StagingPath: directory, RecoveryState: StateMissingMetadata}}
+	if err := store.Delete(item); err == nil {
+		t.Fatal("staging directory deletion accepted")
+	}
+
+	link := filepath.Join(store.Directory(), "staging-link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Logf("symlink unavailable: %v", err)
+	} else {
+		item = RecoveryItem{Metadata: RecoveryMetadata{StagingPath: link, RecoveryState: StateUnsafeStaging}}
+		if err := store.Delete(item); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(link); !os.IsNotExist(err) {
+			t.Fatalf("cache symlink remained: %v", err)
+		}
+	}
+	for filename, want := range map[string]string{outside: "keep", staging.Name(): ""} {
+		data, err := os.ReadFile(filename)
+		if err != nil || string(data) != want {
+			t.Fatalf("protected file changed: %s: %q, %v", filename, data, err)
+		}
+	}
+}
+
 func TestClearRemovesAllEntriesAndKeepsDirectory(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(filepath.Join(root, "cache"))

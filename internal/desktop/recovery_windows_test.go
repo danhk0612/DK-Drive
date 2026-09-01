@@ -27,8 +27,18 @@ func TestRecoveryDisplayHelpers(t *testing.T) {
 	if !recoveryExportable(item) {
 		t.Fatal("preserved item is not exportable")
 	}
+	if !recoveryDeletable(item) {
+		t.Fatal("preserved item is not deletable")
+	}
 	item.Metadata.RecoveryState = localcache.StateInvalidMetadata
 	if recoveryExportable(item) {
 		t.Fatal("invalid metadata item is exportable")
+	}
+	if !recoveryDeletable(item) {
+		t.Fatal("invalid metadata item is not deletable")
+	}
+	item.Metadata.RecoveryState = "unknown"
+	if recoveryDeletable(item) {
+		t.Fatal("unknown recovery item is deletable")
 	}
 }

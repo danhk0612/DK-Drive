@@ -20,6 +20,7 @@ const (
 	idRecoveryRefresh
 	idRecoveryFolder
 	idRecoveryExport
+	idRecoveryDelete
 	idRecoveryClose
 )
 
@@ -28,6 +29,7 @@ var activeRecovery *recoveryDialog
 type recoveryDialog struct {
 	hwnd, owner, font uintptr
 	scale             float64
+	ownerWindow       *window
 	store             *localcache.Store
 	items             []localcache.RecoveryItem
 	selected          int
@@ -35,6 +37,7 @@ type recoveryDialog struct {
 	refreshButton     uintptr
 	folderButton      uintptr
 	exportButton      uintptr
+	deleteButton      uintptr
 	closeButton       uintptr
 }
 
@@ -43,7 +46,7 @@ func showRecoveryDialog(owner *window) error {
 	if err != nil {
 		return err
 	}
-	dialog := &recoveryDialog{owner: owner.hwnd, font: owner.font, scale: owner.scale, store: store, selected: -1}
+	dialog := &recoveryDialog{owner: owner.hwnd, font: owner.font, scale: owner.scale, ownerWindow: owner, store: store, selected: -1}
 	items, err := store.Scan()
 	if err != nil {
 		return err
@@ -136,7 +139,7 @@ func (dialog *recoveryDialog) build() error {
 		h, err = dialog.createControl(class, text, style, x, y, width, height, id)
 		return h
 	}
-	add("STATIC", "보존된 캐시는 자동 업로드·삭제하지 않습니다. 내용을 확인한 뒤 로컬 파일로 내보내세요.", 0, 16, 14, 870, 22, 0)
+	add("STATIC", "보존된 캐시는 자동 업로드·삭제하지 않습니다. 내용을 확인한 뒤 내보내거나 명시적으로 삭제하세요.", 0, 16, 14, 870, 22, 0)
 	dialog.list = add("SysListView32", "", 0x800000|0x0001|0x0004|0x0008, 16, 42, 870, 330, idRecoveryList)
 	send(dialog.list, lvmSetExtendedListViewStyle, 0, 0x1|0x20|0x10000)
 	columns := []struct {
@@ -152,9 +155,10 @@ func (dialog *recoveryDialog) build() error {
 		}
 	}
 	dialog.detail = add("EDIT", "", 0x800000|0x800|4|0x40, 16, 386, 870, 130, 0)
-	dialog.refreshButton = add("BUTTON", "새로 고침", 0, 16, 532, 130, 30, idRecoveryRefresh)
-	dialog.folderButton = add("BUTTON", "캐시 폴더 열기", 0, 160, 532, 160, 30, idRecoveryFolder)
-	dialog.exportButton = add("BUTTON", "선택 항목 내보내기…", 0, 334, 532, 210, 30, idRecoveryExport)
+	dialog.refreshButton = add("BUTTON", "새로 고침", 0, 16, 532, 110, 30, idRecoveryRefresh)
+	dialog.folderButton = add("BUTTON", "캐시 폴더 열기", 0, 140, 532, 140, 30, idRecoveryFolder)
+	dialog.exportButton = add("BUTTON", "선택 항목 내보내기…", 0, 294, 532, 190, 30, idRecoveryExport)
+	dialog.deleteButton = add("BUTTON", "선택 항목 삭제", 0, 498, 532, 145, 30, idRecoveryDelete)
 	dialog.closeButton = add("BUTTON", "닫기", bsDefault, 756, 532, 130, 30, idRecoveryClose)
 	return err
 }
@@ -196,6 +200,7 @@ func (dialog *recoveryDialog) updateDetails() {
 	if dialog.selected < 0 || dialog.selected >= len(dialog.items) {
 		setText(dialog.detail, "보존 캐시 항목이 없습니다.")
 		call("EnableWindow", dialog.exportButton, 0)
+		call("EnableWindow", dialog.deleteButton, 0)
 		return
 	}
 	item := dialog.items[dialog.selected]
@@ -214,6 +219,7 @@ func (dialog *recoveryDialog) updateDetails() {
 	}
 	setText(dialog.detail, strings.Join(lines, "\r\n"))
 	call("EnableWindow", dialog.exportButton, enabledWord(recoveryExportable(item)))
+	call("EnableWindow", dialog.deleteButton, enabledWord(recoveryDeletable(item)))
 }
 
 func emptyValue(values ...string) string {
@@ -227,6 +233,16 @@ func emptyValue(values ...string) string {
 
 func recoveryExportable(item localcache.RecoveryItem) bool {
 	return item.Metadata.RecoveryState == localcache.StatePreserved || item.Metadata.RecoveryState == localcache.StateMissingMetadata
+}
+
+func recoveryDeletable(item localcache.RecoveryItem) bool {
+	switch item.Metadata.RecoveryState {
+	case localcache.StatePreserved, localcache.StateMissingMetadata, localcache.StateMissingStaging,
+		localcache.StateInvalidMetadata, localcache.StateUnsafeStaging:
+		return true
+	default:
+		return false
+	}
 }
 
 func recoveryStateText(state localcache.RecoveryState) string {
@@ -332,8 +348,37 @@ func (dialog *recoveryDialog) exportSelected() {
 	box(dialog.hwnd, "로컬 파일로 내보냈습니다.\n\n"+destination+"\n\n원본 캐시는 삭제하지 않았습니다.", 0x40)
 }
 
+func (dialog *recoveryDialog) deleteSelected() {
+	if dialog.selected < 0 || dialog.selected >= len(dialog.items) {
+		return
+	}
+	if dialog.ownerWindow.anyConnected() {
+		alert(dialog.hwnd, "연결된 드라이브가 있으면 복구 항목을 삭제할 수 없습니다. 모든 드라이브를 먼저 해제하세요.")
+		return
+	}
+	item := dialog.items[dialog.selected]
+	if !recoveryDeletable(item) {
+		return
+	}
+	remotePath := emptyValue(item.Metadata.RemotePath)
+	message := "선택한 보존 캐시 항목을 삭제할까요?\n\n원격 경로: " + remotePath +
+		"\n로컬 캐시: " + item.Metadata.StagingPath +
+		"\n크기: " + formatByteSize(item.Metadata.Size) +
+		"\n\n로컬로 내보내지 않은 데이터가 영구 삭제되며 되돌릴 수 없습니다."
+	if box(dialog.hwnd, message, 0x134) != 6 {
+		return
+	}
+	if err := dialog.store.Delete(item); err != nil {
+		dialog.refresh()
+		alert(dialog.hwnd, err.Error())
+		return
+	}
+	dialog.refresh()
+	box(dialog.hwnd, "선택한 보존 캐시 항목을 삭제했습니다.", 0x40)
+}
+
 func (dialog *recoveryDialog) resize(width, height int32) {
-	minimumWidth, minimumHeight := dialog.px(760), dialog.px(500)
+	minimumWidth, minimumHeight := dialog.px(800), dialog.px(500)
 	if width < minimumWidth || height < minimumHeight {
 		return
 	}
@@ -346,9 +391,10 @@ func (dialog *recoveryDialog) resize(width, height int32) {
 	listHeight := detailY - dialog.px(14) - listTop
 	call("MoveWindow", dialog.list, uintptr(margin), uintptr(listTop), uintptr(width-2*margin), uintptr(listHeight), 1)
 	call("MoveWindow", dialog.detail, uintptr(margin), uintptr(detailY), uintptr(width-2*margin), uintptr(detailHeight), 1)
-	call("MoveWindow", dialog.refreshButton, uintptr(margin), uintptr(buttonY), uintptr(dialog.px(130)), uintptr(buttonHeight), 1)
-	call("MoveWindow", dialog.folderButton, uintptr(dialog.px(160)), uintptr(buttonY), uintptr(dialog.px(160)), uintptr(buttonHeight), 1)
-	call("MoveWindow", dialog.exportButton, uintptr(dialog.px(334)), uintptr(buttonY), uintptr(dialog.px(210)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.refreshButton, uintptr(margin), uintptr(buttonY), uintptr(dialog.px(110)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.folderButton, uintptr(dialog.px(140)), uintptr(buttonY), uintptr(dialog.px(140)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.exportButton, uintptr(dialog.px(294)), uintptr(buttonY), uintptr(dialog.px(190)), uintptr(buttonHeight), 1)
+	call("MoveWindow", dialog.deleteButton, uintptr(dialog.px(498)), uintptr(buttonY), uintptr(dialog.px(145)), uintptr(buttonHeight), 1)
 	call("MoveWindow", dialog.closeButton, uintptr(width-dialog.px(146)), uintptr(buttonY), uintptr(dialog.px(130)), uintptr(buttonHeight), 1)
 }
 
@@ -368,6 +414,8 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 			}
 		case idRecoveryExport:
 			dialog.exportSelected()
+		case idRecoveryDelete:
+			dialog.deleteSelected()
 		case idRecoveryClose:
 			call("DestroyWindow", h)
 		}
@@ -389,7 +437,7 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 		if lp != 0 {
 			pointer := *(*unsafe.Pointer)(unsafe.Pointer(&lp))
 			limits := (*minMaxInfo)(pointer)
-			limits.MinTrackSize = point{X: dialog.px(760), Y: dialog.px(500)}
+			limits.MinTrackSize = point{X: dialog.px(800), Y: dialog.px(500)}
 			return 0
 		}
 	case wmClose:

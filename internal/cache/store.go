@@ -260,6 +260,56 @@ func (store *Store) Export(item RecoveryItem, destination string) error {
 	return nil
 }
 
+// Delete removes one scanned recovery item. Callers must ensure that no active
+// mount is using the store because metadata-less staging files can be live.
+func (store *Store) Delete(item RecoveryItem) error {
+	switch item.Metadata.RecoveryState {
+	case StatePreserved, StateMissingMetadata, StateMissingStaging, StateInvalidMetadata, StateUnsafeStaging:
+	default:
+		return fmt.Errorf("삭제할 수 없는 복구 상태입니다: %s", item.Metadata.RecoveryState)
+	}
+
+	stagingPath, err := store.safeStagingPath(item.Metadata.StagingPath)
+	if err != nil {
+		return err
+	}
+	expectedMetadata := stagingPath + metadataSuffix
+	metadataPath := ""
+	if item.MetadataPath != "" {
+		metadataPath, err = filepath.Abs(item.MetadataPath)
+		if err != nil {
+			return fmt.Errorf("복구 메타데이터 경로 확인 실패: %w", err)
+		}
+		if metadataPath != expectedMetadata {
+			return errors.New("선택 항목의 캐시 파일과 메타데이터 경로가 일치하지 않습니다")
+		}
+	}
+
+	if err := removeRecoveryFile(stagingPath); err != nil {
+		return fmt.Errorf("보존 캐시 파일 삭제 실패: %w", err)
+	}
+	if metadataPath != "" {
+		if err := removeRecoveryFile(metadataPath); err != nil {
+			return fmt.Errorf("복구 메타데이터 삭제 실패: %w", err)
+		}
+	}
+	return nil
+}
+
+func removeRecoveryFile(filename string) error {
+	info, err := os.Lstat(filename)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("디렉터리는 복구 항목으로 삭제할 수 없습니다: %s", filename)
+	}
+	return os.Remove(filename)
+}
+
 func (store *Store) scanMetadata(metadataPath, expectedStaging string) RecoveryItem {
 	item := RecoveryItem{MetadataPath: metadataPath}
 	data, err := os.ReadFile(metadataPath)
