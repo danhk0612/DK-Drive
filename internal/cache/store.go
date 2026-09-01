@@ -62,6 +62,20 @@ type RecoveryItem struct {
 	Problem      string
 }
 
+type ProfileUsage struct {
+	Items int
+	Bytes int64
+}
+
+type Usage struct {
+	TotalBytes        int64
+	RecoveryItems     int
+	RecoveryBytes     int64
+	UnclassifiedItems int
+	UnclassifiedBytes int64
+	Profiles          map[string]ProfileUsage
+}
+
 type Store struct {
 	directory string
 }
@@ -210,6 +224,54 @@ func (store *Store) Scan() ([]RecoveryItem, error) {
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+// Usage reports cache bytes without following directories or symbolic links.
+// Recovery bytes count each scanned staging file once; metadata size remains
+// included only in TotalBytes.
+func (store *Store) Usage(items []RecoveryItem) (Usage, error) {
+	usage := Usage{Profiles: make(map[string]ProfileUsage)}
+	entries, err := os.ReadDir(store.directory)
+	if err != nil {
+		return usage, fmt.Errorf("캐시 사용량 확인 실패: %w", err)
+	}
+	for _, entry := range entries {
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return usage, fmt.Errorf("캐시 항목 크기 확인 실패: %s: %w", entry.Name(), infoErr)
+		}
+		if info.Mode()&os.ModeSymlink == 0 && info.Mode().IsRegular() {
+			usage.TotalBytes += info.Size()
+		}
+	}
+
+	seen := make(map[string]bool)
+	for _, item := range items {
+		usage.RecoveryItems++
+		if item.Metadata.RecoveryState == StateMissingMetadata {
+			usage.UnclassifiedItems++
+		}
+		stagingPath, pathErr := store.safeStagingPath(item.Metadata.StagingPath)
+		if pathErr != nil || seen[stagingPath] {
+			continue
+		}
+		info, infoErr := os.Lstat(stagingPath)
+		if infoErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			continue
+		}
+		seen[stagingPath] = true
+		usage.RecoveryBytes += info.Size()
+		if item.Metadata.RecoveryState == StateMissingMetadata {
+			usage.UnclassifiedBytes += info.Size()
+		}
+		if item.Metadata.ProfileID != "" {
+			profile := usage.Profiles[item.Metadata.ProfileID]
+			profile.Items++
+			profile.Bytes += info.Size()
+			usage.Profiles[item.Metadata.ProfileID] = profile
+		}
+	}
+	return usage, nil
 }
 
 func (store *Store) Export(item RecoveryItem, destination string) error {

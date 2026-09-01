@@ -40,8 +40,10 @@ type recoveryDialog struct {
 	ownerWindow       *window
 	store             *localcache.Store
 	items             []localcache.RecoveryItem
+	usage             localcache.Usage
 	selected          int
 	busy              bool
+	summary           uintptr
 	list, detail      uintptr
 	refreshButton     uintptr
 	folderButton      uintptr
@@ -72,6 +74,10 @@ func showRecoveryDialog(owner *window) error {
 		return err
 	}
 	dialog.items = items
+	dialog.usage, err = store.Usage(items)
+	if err != nil {
+		return err
+	}
 	var instance windows.Handle
 	if err := windows.GetModuleHandleEx(0, nil, &instance); err != nil {
 		return err
@@ -107,6 +113,7 @@ func showRecoveryDialog(owner *window) error {
 		call("EnableWindow", owner.hwnd, 1)
 		call("SetForegroundWindow", owner.hwnd)
 		owner.recoveryItems = dialog.items
+		owner.cacheUsage = dialog.usage
 		owner.updateRecoveryButton()
 	}()
 	call("ShowWindow", h, 5)
@@ -159,8 +166,8 @@ func (dialog *recoveryDialog) build() error {
 		h, err = dialog.createControl(class, text, style, x, y, width, height, id)
 		return h
 	}
-	add("STATIC", "보존된 캐시는 자동 업로드·삭제하지 않습니다. 내용을 확인한 뒤 내보내기·원격 재시도·삭제를 선택하세요.", 0, 16, 14, 870, 22, 0)
-	dialog.list = add("SysListView32", "", 0x800000|0x0001|0x0004|0x0008, 16, 42, 870, 330, idRecoveryList)
+	dialog.summary = add("STATIC", "", 0, 16, 10, 870, 40, 0)
+	dialog.list = add("SysListView32", "", 0x800000|0x0001|0x0004|0x0008, 16, 54, 870, 318, idRecoveryList)
 	send(dialog.list, lvmSetExtendedListViewStyle, 0, 0x1|0x20|0x10000)
 	columns := []struct {
 		title string
@@ -191,6 +198,13 @@ func (dialog *recoveryDialog) refresh() {
 		return
 	}
 	dialog.items = items
+	usage, err := dialog.store.Usage(items)
+	if err != nil {
+		alert(dialog.hwnd, err.Error())
+		return
+	}
+	dialog.usage = usage
+	dialog.updateSummary()
 	if dialog.selected >= len(items) {
 		dialog.selected = -1
 	}
@@ -217,6 +231,14 @@ func (dialog *recoveryDialog) refresh() {
 	dialog.updateDetails()
 }
 
+func (dialog *recoveryDialog) updateSummary() {
+	setText(dialog.summary, fmt.Sprintf(
+		"보존된 캐시는 자동 업로드·삭제하지 않습니다.\r\n전체 캐시 %s · 복구 목록 %d개/%s · 메타데이터 없는 항목 %d개/%s",
+		formatByteSize(dialog.usage.TotalBytes), dialog.usage.RecoveryItems, formatByteSize(dialog.usage.RecoveryBytes),
+		dialog.usage.UnclassifiedItems, formatByteSize(dialog.usage.UnclassifiedBytes),
+	))
+}
+
 func (dialog *recoveryDialog) updateDetails() {
 	if dialog.selected < 0 || dialog.selected >= len(dialog.items) {
 		setText(dialog.detail, "보존 캐시 항목이 없습니다.")
@@ -232,6 +254,9 @@ func (dialog *recoveryDialog) updateDetails() {
 		"로컬 캐시: " + metadata.StagingPath,
 		"메타데이터: " + emptyValue(item.MetadataPath),
 		"보존 사유: " + recoveryReasonText(metadata.Reason),
+	}
+	if profile, ok := dialog.usage.Profiles[metadata.ProfileID]; ok {
+		lines = append(lines, fmt.Sprintf("이 프로필 보존 캐시: %d개 / %s", profile.Items, formatByteSize(profile.Bytes)))
 	}
 	if metadata.LastError != "" {
 		lines = append(lines, "마지막 오류: "+metadata.LastError)
@@ -566,12 +591,13 @@ func (dialog *recoveryDialog) resize(width, height int32) {
 		return
 	}
 	margin := dialog.px(16)
-	listTop := dialog.px(42)
+	listTop := dialog.px(54)
 	buttonHeight := dialog.px(30)
 	buttonY := height - dialog.px(58)
 	detailHeight := dialog.px(130)
 	detailY := buttonY - dialog.px(16) - detailHeight
 	listHeight := detailY - dialog.px(14) - listTop
+	call("MoveWindow", dialog.summary, uintptr(margin), uintptr(dialog.px(10)), uintptr(width-2*margin), uintptr(dialog.px(40)), 1)
 	call("MoveWindow", dialog.list, uintptr(margin), uintptr(listTop), uintptr(width-2*margin), uintptr(listHeight), 1)
 	call("MoveWindow", dialog.detail, uintptr(margin), uintptr(detailY), uintptr(width-2*margin), uintptr(detailHeight), 1)
 	call("MoveWindow", dialog.refreshButton, uintptr(margin), uintptr(buttonY), uintptr(dialog.px(90)), uintptr(buttonHeight), 1)
