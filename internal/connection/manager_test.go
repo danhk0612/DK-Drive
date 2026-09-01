@@ -129,6 +129,27 @@ func TestManagerKeepsDisconnectFailureDiagnostic(t *testing.T) {
 	}
 }
 
+func TestManagerRecordsPreflightFailure(t *testing.T) {
+	m := New(func(context.Context, string, config.Profile, config.Secrets) (Session, error) {
+		t.Fatal("factory called")
+		return nil, nil
+	})
+	invalid := profile("X")
+	invalid.Host = ""
+	if err := m.Connect(context.Background(), "id", invalid, config.Secrets{}); err == nil {
+		t.Fatal("invalid profile connected")
+	}
+	if diagnostic := m.Diagnostic("id"); diagnostic.State != "오류" || diagnostic.LastError == "" || diagnostic.ErrorAt.IsZero() {
+		t.Fatalf("preflight diagnostic = %+v", diagnostic)
+	}
+
+	external := errors.New("credential decrypt failed")
+	m.RecordError("other", external)
+	if diagnostic := m.Diagnostic("other"); diagnostic.State != "오류" || diagnostic.LastError != external.Error() {
+		t.Fatalf("external diagnostic = %+v", diagnostic)
+	}
+}
+
 func TestManagerPassesProfileIDToFactory(t *testing.T) {
 	var got string
 	m := New(func(_ context.Context, id string, _ config.Profile, _ config.Secrets) (Session, error) {

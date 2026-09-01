@@ -63,11 +63,25 @@ func (m *Manager) Diagnostic(id string) Diagnostic {
 	return result
 }
 
+func (m *Manager) RecordError(id string, err error) {
+	if id == "" || err == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := "오류"
+	if e := m.entries[id]; e != nil {
+		state = e.state
+	}
+	m.errors[id] = Diagnostic{State: state, LastError: err.Error(), ErrorAt: time.Now().UTC()}
+}
+
 func (m *Manager) Connect(ctx context.Context, id string, p config.Profile, secret config.Secrets) error {
 	if id == "" {
 		return errors.New("연결 ID가 필요합니다")
 	}
 	if err := p.Validate(); err != nil {
+		m.RecordError(id, err)
 		return err
 	}
 	m.mu.Lock()

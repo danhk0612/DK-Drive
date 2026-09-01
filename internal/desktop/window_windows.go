@@ -767,6 +767,12 @@ func (w *window) report(err error) {
 	}
 }
 
+func (w *window) reportConnectionError(id string, err error) {
+	w.manager.RecordError(id, err)
+	w.refreshList()
+	w.report(err)
+}
+
 func (w *window) anyConnected() bool {
 	for _, p := range w.settings.Profiles {
 		if !connectionInactive(w.manager.State(p.ID)) {
@@ -1078,7 +1084,7 @@ func (w *window) loadEditor(index int) {
 	w.maskSecrets()
 	w.updateProtocolControls()
 	if err != nil {
-		w.report(err)
+		w.reportConnectionError(p.ID, err)
 	} else {
 		setText(w.status, profileDiagnosticText(w.manager.Diagnostic(p.ID), w.cacheUsage.Profiles[p.ID]))
 	}
@@ -1236,16 +1242,16 @@ func (w *window) connect(index int) {
 	p := w.settings.Profiles[index]
 	used, driveErr := windows.GetLogicalDrives()
 	if driveErr != nil {
-		w.report(fmt.Errorf("Windows 드라이브 문자 확인 실패: %w", driveErr))
+		w.reportConnectionError(p.ID, fmt.Errorf("Windows 드라이브 문자 확인 실패: %w", driveErr))
 		return
 	}
 	if err := validateDriveAssignment(p.Profile.DriveLetter, p.ID, w.settings.Profiles, used); err != nil {
-		w.report(err)
+		w.reportConnectionError(p.ID, err)
 		return
 	}
 	s, err := w.secrets(p)
 	if err != nil {
-		w.report(err)
+		w.reportConnectionError(p.ID, err)
 		return
 	}
 	w.task(func() error {
@@ -1268,14 +1274,19 @@ func (w *window) connectAll(auto bool) {
 			}
 			used, driveErr := windows.GetLogicalDrives()
 			if driveErr != nil {
+				w.manager.RecordError(p.ID, driveErr)
 				result = errors.Join(result, fmt.Errorf("%s: Windows 드라이브 문자 확인 실패: %w", p.Profile.Name, driveErr))
 				continue
 			}
 			if driveErr = validateDriveAssignment(p.Profile.DriveLetter, p.ID, profiles, used); driveErr != nil {
+				w.manager.RecordError(p.ID, driveErr)
 				result = errors.Join(result, fmt.Errorf("%s: %w", p.Profile.Name, driveErr))
 				continue
 			}
 			s, err := w.secrets(p)
+			if err != nil {
+				w.manager.RecordError(p.ID, err)
+			}
 			if err == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				err = w.manager.Connect(ctx, p.ID, p.Profile, s)
