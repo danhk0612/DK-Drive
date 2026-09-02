@@ -34,10 +34,12 @@ go build -ldflags="-H=windowsgui" -o bin/dkdrive.exe ./cmd/dkdrive
   해제 질문 없이 드라이브가 사라져야 한다.
 - 다시 연결하고 탐색기에서 루트를 연 상태로 일반 해제한다. 단순 디렉터리 열거 핸들은
   자동 정리되어 강제 해제 질문 없이 해제되어야 한다.
-- 연결 이름과 탐색기 볼륨명이 같은지 확인한다.
+- 연결 이름과 탐색기 볼륨명이 같은지 확인한다. WinFsp 사용자 모드 드라이브는
+  `Get-Volume`에서 빠질 수 있으므로 `Win32_LogicalDisk`로 확인한다.
 
 ```powershell
-Get-Volume | Where-Object DriveLetter | Select-Object DriveLetter, FileSystemLabel
+Get-CimInstance Win32_LogicalDisk |
+    Select-Object DeviceID, VolumeName, FileSystem, DriveType
 ```
 
 ## 3. 연결 오류와 진단 표시
@@ -67,17 +69,38 @@ $RemoteDir = "$Drive\DK-Drive 검증\recovery-$Run"
 New-Item -ItemType Directory -Path $RemoteDir -Force | Out-Null
 $RemoteFile = Join-Path $RemoteDir 'force-preserved.txt'
 $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes('DK-Drive 원격 재시도 검증')
-$RecoveryStream = [System.IO.File]::Open(
+$RecoveryStream = [System.IO.FileStream]::new(
     $RemoteFile,
     [System.IO.FileMode]::CreateNew,
     [System.IO.FileAccess]::Write,
-    [System.IO.FileShare]::ReadWrite
+    [System.IO.FileShare]::ReadWrite,
+    4096,
+    [System.IO.FileOptions]::None
 )
 $RecoveryStream.Write($Bytes, 0, $Bytes.Length)
+$RecoveryStream.Flush($true)
+
+$CachePath = Join-Path $env:LOCALAPPDATA 'DKDrive\Cache'
+$Staging = Get-ChildItem $CachePath -File -Force |
+    Where-Object {
+        $_.Name -like 'staging-*' -and
+        $_.Name -notlike '*.recovery.json'
+    } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+
+$Bytes.Length
+$Staging | Select-Object Name, Length, LastWriteTime
 ```
 
-`Flush()`와 `Dispose()`는 아직 호출하지 않는다. GUI에서 해당 드라이브를 일반 해제한
-뒤 강제 해제 질문에서 `예`를 선택한다. 드라이브 제거와 캐시 위치 안내를 확인한 후
+Windows 파일 캐시는 쓰기 크기와 무관하게 DK-Drive에 데이터를 늦게 전달할 수 있다.
+강제 해제 전에 반드시 실제 캐시 폴더의 새 스테이징 파일 크기가 `$Bytes.Length`와
+같은지 확인한다. `Flush($true)`는 스테이징 반영뿐 아니라 원격 업로드도 수행한다.
+애플리케이션 또는 Windows 버퍼에만 있고 DK-Drive에 전달되지 않은 바이트는 강제
+해제로 보존할 수 없다.
+
+스테이징 크기가 일치할 때 스트림을 연 채 GUI에서 해당 드라이브를 일반 해제하고,
+강제 해제 질문에서 `예`를 선택한다. 드라이브 제거와 캐시 위치 안내를 확인한 후
 스트림을 정리한다.
 
 ```powershell
@@ -85,9 +108,18 @@ try { $RecoveryStream.Dispose() } catch { $_.Exception.Message }
 $RecoveryStream = $null
 ```
 
-같은 프로필을 다시 연결한 뒤 `Test-Path $RemoteFile`이 `False`인지 확인하고 다시 정상
-해제한다. 복구 창을 열어 새 항목의 프로필·프로토콜·원격 경로·
-크기·보존 시각·사유가 표시되고 프로그램 재시작만으로 자동 업로드되지 않는지 확인한다.
+복구 창을 열어 새 항목의 프로필·프로토콜·원격 경로·크기·보존 시각·사유가 표시되고
+프로그램 재시작만으로 자동 업로드되지 않는지 확인한다. 원격 파일 없음 재시도를 만들
+때는 같은 프로필을 다시 연결한 뒤 파일만 삭제하고 상위 폴더는 유지한다.
+
+```powershell
+cmd /c del /f /q "$RemoteFile"
+Test-Path $RemoteFile
+Test-Path $RemoteDir
+```
+
+각 결과는 `False`, `True`여야 한다. 폴더까지 삭제하면 현재 원격 재시도는 상위 폴더를
+자동 생성하지 않으며 WebDAV 서버는 `409 Conflict`를 반환할 수 있다.
 
 ## 5. 캐시 사용량 표시
 
@@ -111,6 +143,8 @@ Get-ChildItem $CachePath -Force | Select-Object Name, Length, LastWriteTime
 4. 캐시 삭제 질문에서는 `아니요`를 선택한다.
 5. 프로필을 연결해 원격 내용이 `DK-Drive 원격 재시도 검증`인지 확인한다.
 6. 복구 항목과 메타데이터가 그대로 남는지 확인한다.
+7. 상위 폴더까지 없는 상태의 재시도는 별도 실패 사례다. 현재 구현은 폴더를 자동
+   생성하지 않으며, 실패해도 원본 캐시와 메타데이터가 유지되어야 한다.
 
 ## 7. 충돌의 건너뛰기·다른 이름·덮어쓰기
 
@@ -136,25 +170,32 @@ Get-ChildItem $CachePath -Force | Select-Object Name, Length, LastWriteTime
 
 ## 8. 재시도 중 창 닫기와 연결 중 캐시 삭제 차단
 
-전송 시간이 눈에 보이는 큰 보존 항목이 있을 때 재시도 직후 복구 창의 X와 `닫기`를
-각각 누른다. `원격 재시도가 끝날 때까지 ... 닫을 수 없습니다` 안내가 나오고 창과
-프로그램이 유지되어야 한다. 큰 항목이 없거나 전송이 즉시 끝나면 이 항목은 결과에
-`재현 불가(전송이 너무 빠름)`로 기록한다.
+전송 시간이 눈에 보이는 큰 보존 항목이 있을 때 재시도 직후 복구 창의 X를 누른다.
+`원격 재시도가 끝날 때까지 ... 닫을 수 없습니다` 안내가 나오고 창과 프로그램이
+유지되어야 한다. 하단 `닫기` 버튼은 전송 중 비활성화되어야 한다. 큰 항목이 없거나
+전송이 즉시 끝나면 이 항목은 결과에 `재현 불가(전송이 너무 빠름)`로 기록한다.
 
-필요하면 4번과 같은 방식으로 `force-preserved-large.bin`을 열고 아래 128 MiB를 쓴 뒤
-`Flush()`·`Dispose()` 전에 강제 해제하여 큰 보존 항목을 만든다.
+필요하면 4번과 같은 방식으로 대용량 파일을 연다. 실제 전송 시간이 너무 짧으면
+512 MiB 등 테스트 서버에 맞는 크기를 사용한다.
 
 ```powershell
 $LargeFile = Join-Path $RemoteDir 'force-preserved-large.bin'
-$LargeStream = [System.IO.File]::Open(
+$LargeStream = [System.IO.FileStream]::new(
     $LargeFile,
     [System.IO.FileMode]::CreateNew,
     [System.IO.FileAccess]::Write,
-    [System.IO.FileShare]::ReadWrite
+    [System.IO.FileShare]::ReadWrite,
+    4096,
+    [System.IO.FileOptions]::SequentialScan
 )
 $LargeBlock = [byte[]]::new(1MB)
-1..128 | ForEach-Object { $LargeStream.Write($LargeBlock, 0, $LargeBlock.Length) }
+1..512 | ForEach-Object { $LargeStream.Write($LargeBlock, 0, $LargeBlock.Length) }
+$LargeStream.Flush($true)
 ```
+
+실제 스테이징 크기가 `536870912`인지 확인한 뒤 스트림을 연 채 강제 해제한다.
+`Flush($true)`로 먼저 생성된 원격 파일은 재연결 후 파일만 삭제하고, 상위 폴더를
+유지한 채 정상 해제한 다음 재시도한다.
 
 재시도 성공 후 캐시를 남긴 상태에서 프로필을 연결하고 `선택 항목 삭제`와 트레이
 `캐시 정리`를 각각 시도한다. 둘 다 연결 중이라는 이유로 차단되고 원격/캐시 파일이
@@ -189,6 +230,31 @@ Get-ChildItem $CachePath -Force
 - 자동 연결 직후 아무 파일도 열지 않은 상태에서 일반 해제가 성공하는지 다시 확인
 
 검증 후 자동 연결과 Windows 로그인 실행 설정은 원하는 운영 상태로 되돌린다.
+
+## 2026-09-02 실행 결과
+
+1. 빌드·자동 테스트: 통과
+2. UI·트레이·일반 해제: 통과
+3. 연결 오류 진단: 통과
+4. 보존 항목 생성: 통과
+5. 캐시 사용량: 통과
+6. 원격 파일 없음 재시도: 통과
+7. 충돌 3가지 선택: 통과
+8. 재시도 중 닫기·삭제 차단: 통과
+9. 선택 삭제·전체 정리: 통과
+10. 로그인 자동 실행·자동 연결: 로그인 후 확인 보류
+
+추가 관찰 결과:
+
+- DK-Drive와 RaiDrive 같은 사용자 모드 드라이브는 `Get-Volume`에 표시되지 않을 수
+  있으나 `Win32_LogicalDisk`로 확인할 수 있다.
+- `FileStream`의 버퍼 크기나 128 MiB 연속 쓰기만으로는 스테이징 파일 크기가 증가하지
+  않았고, `Flush($true)` 뒤 실제 바이트가 반영됐다.
+- 열린 쓰기 스트림에 `FileShare.ReadWrite`를 지정했어도 같은 가상 경로의 동시 읽기는
+  다른 프로세스가 사용 중이라는 오류로 차단됐다. 스트림 종료 뒤 읽기는 정상이다.
+- 원격 상위 폴더까지 삭제한 재시도는 WebDAV `409 Conflict`로 실패했고 캐시는
+  보존됐다. 상위 폴더를 다시 만든 뒤 같은 재시도는 성공했다.
+- 재시도 중 제목 표시줄 X는 안내창으로 차단되고 하단 `닫기`는 비활성화됐다.
 
 ## 결과 보고 형식
 
