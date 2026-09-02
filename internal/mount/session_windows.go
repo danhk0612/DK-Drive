@@ -24,7 +24,9 @@ type Session struct {
 }
 
 func StartSession(backend vfs.Backend, options Options, metadata bool) (*Session, error) {
-	store, err := localcache.New("")
+	store, err := localcache.NewWithLimits("", localcache.Limits{
+		MaxFileBytes: options.CacheLimits.MaxFileBytes, MaxTotalBytes: options.CacheLimits.MaxTotalBytes,
+	})
 	if err != nil {
 		return nil, err
 	}

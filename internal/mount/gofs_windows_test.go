@@ -134,6 +134,27 @@ func TestStagingFileRemovedAfterSuccessfulUpload(t *testing.T) {
 	assertCacheEntryCount(t, store.Directory(), 0)
 }
 
+func TestStagingFileRejectsWriteBeyondCacheLimit(t *testing.T) {
+	store, err := localcache.NewWithLimits(t.TempDir(), localcache.Limits{MaxFileBytes: 5, MaxTotalBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filesystem := NewGoFileSystem(&stagingBackend{}, false, store)
+	file, err := filesystem.OpenFile("limited.txt", os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("123456")); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("Write() error = %v, want ENOSPC", err)
+	}
+	if err := file.Truncate(6); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("Truncate() error = %v, want ENOSPC", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStagingFilePreservedAfterUploadFailure(t *testing.T) {
 	store, err := localcache.New(t.TempDir())
 	if err != nil {

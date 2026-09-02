@@ -2,12 +2,110 @@ package cache
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestLockResizeEnforcesFileAndTotalLimits(t *testing.T) {
+	store, err := NewWithLimits(filepath.Join(t.TempDir(), "cache"), Limits{MaxFileBytes: 5, MaxTotalBytes: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := store.LockResize(first.Name(), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.WriteString("12345"); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if _, err := store.LockResize(first.Name(), 6); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("file limit error: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err = store.LockResize(second.Name(), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.WriteString("678"); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if _, err := store.LockResize(second.Name(), 4); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("total limit error: %v", err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPruneExpiredRemovesOnlyOldPreservedItems(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
+	makePreserved := func(name string, preservedAt time.Time) RecoveryItem {
+		file, createErr := store.CreateStaging()
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if _, writeErr := file.WriteString(name); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		item, preserveErr := store.Preserve(Preservation{StagingPath: file.Name(), RemotePath: "/" + name})
+		if preserveErr != nil {
+			t.Fatal(preserveErr)
+		}
+		item.Metadata.PreservedAt = preservedAt
+		if metadataErr := store.writeMetadataAtomic(item.MetadataPath, item.Metadata); metadataErr != nil {
+			t.Fatal(metadataErr)
+		}
+		return item
+	}
+	old := makePreserved("old", now.AddDate(0, 0, -31))
+	recent := makePreserved("recent", now.AddDate(0, 0, -29))
+	orphan, err := store.CreateStaging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphanPath := orphan.Name()
+	if err := orphan.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := store.PruneExpired(30, now)
+	if err != nil || removed != 1 {
+		t.Fatalf("PruneExpired() = %d, %v", removed, err)
+	}
+	if _, err := os.Stat(old.Metadata.StagingPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old staging remains: %v", err)
+	}
+	for _, path := range []string{recent.Metadata.StagingPath, recent.MetadataPath, orphanPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("retained path %s: %v", path, err)
+		}
+	}
+}
 
 func TestNewCreatesCustomDirectory(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "nested", "cache")

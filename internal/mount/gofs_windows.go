@@ -87,8 +87,14 @@ func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode
 	}()
 
 	if exists && flag&os.O_TRUNC == 0 {
-		if err := filesystem.download(name, temporaryPath); err != nil {
-			return nil, err
+		unlock, limitErr := filesystem.cacheStore.LockResize(temporaryPath, entry.Size)
+		if limitErr != nil {
+			return nil, limitErr
+		}
+		downloadErr := filesystem.download(name, temporaryPath)
+		unlock()
+		if downloadErr != nil {
+			return nil, downloadErr
 		}
 	}
 
@@ -110,6 +116,7 @@ func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode
 		modTime:        entry.ModTime,
 		dirty:          dirty,
 		writePermitted: flag&(os.O_WRONLY|os.O_RDWR) != 0,
+		appendMode:     flag&os.O_APPEND != 0,
 		createdAt:      time.Now().UTC(),
 	}
 	filesystem.openFiles.Store(file, struct{}{})
@@ -269,6 +276,7 @@ type stagedFile struct {
 	modTime        time.Time
 	dirty          bool
 	writePermitted bool
+	appendMode     bool
 	requestedTime  time.Time
 	createdAt      time.Time
 	closed         bool
@@ -278,6 +286,23 @@ type stagedFile struct {
 func (file *stagedFile) Write(buffer []byte) (int, error) {
 	file.mutex.Lock()
 	defer file.mutex.Unlock()
+	position, err := file.File.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+	info, err := file.File.Stat()
+	if err != nil {
+		return 0, err
+	}
+	newSize := max(info.Size(), position+int64(len(buffer)))
+	if file.appendMode {
+		newSize = info.Size() + int64(len(buffer))
+	}
+	unlock, err := file.filesystem.cacheStore.LockResize(file.temporaryPath, newSize)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	file.markDirtyLocked()
 	return file.File.Write(buffer)
 }
@@ -285,6 +310,19 @@ func (file *stagedFile) Write(buffer []byte) (int, error) {
 func (file *stagedFile) WriteAt(buffer []byte, offset int64) (int, error) {
 	file.mutex.Lock()
 	defer file.mutex.Unlock()
+	if offset < 0 {
+		return 0, os.ErrInvalid
+	}
+	info, err := file.File.Stat()
+	if err != nil {
+		return 0, err
+	}
+	newSize := max(info.Size(), offset+int64(len(buffer)))
+	unlock, err := file.filesystem.cacheStore.LockResize(file.temporaryPath, newSize)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	file.markDirtyLocked()
 	return file.File.WriteAt(buffer, offset)
 }
@@ -292,6 +330,11 @@ func (file *stagedFile) WriteAt(buffer []byte, offset int64) (int, error) {
 func (file *stagedFile) Truncate(size int64) error {
 	file.mutex.Lock()
 	defer file.mutex.Unlock()
+	unlock, err := file.filesystem.cacheStore.LockResize(file.temporaryPath, size)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	file.markDirtyLocked()
 	return file.File.Truncate(size)
 }

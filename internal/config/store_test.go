@@ -31,7 +31,7 @@ func (p testProtector) Unprotect(b []byte) ([]byte, error) { return p.Protect(b)
 func TestSettingsRoundTripAndSecretSeparation(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "settings.json")
 	s, err := LoadSettings(file)
-	if err != nil || s.Version != 1 || !s.CloseToTray {
+	if err != nil || s.Version != 1 || !s.CloseToTray || s.CacheRetentionDays != 30 || s.CacheMaxFileBytes != 10<<30 || s.CacheMaxTotalBytes != 50<<30 {
 		t.Fatalf("default: %+v %v", s, err)
 	}
 	p := savedFixture()
@@ -70,6 +70,20 @@ func TestSettingsRoundTripAndSecretSeparation(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsAddsCacheDefaultsToLegacyFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(file, []byte(`{"Version":1,"CloseToTray":true,"Profiles":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := LoadSettings(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.CacheRetentionDays != 30 || settings.CacheMaxFileBytes != 10<<30 || settings.CacheMaxTotalBytes != 50<<30 {
+		t.Fatalf("cache defaults: %+v", settings)
+	}
+}
+
 func TestSettingsRejectInvalidWithoutReplacing(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "settings.json")
 	s := DefaultSettings()
@@ -78,13 +92,19 @@ func TestSettingsRejectInvalidWithoutReplacing(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(filename)
-	for _, kind := range []string{"version", "duplicate-id", "duplicate-drive", "invalid-profile"} {
+	for _, kind := range []string{"version", "cache-days", "cache-file", "cache-total", "duplicate-id", "duplicate-drive", "invalid-profile"} {
 		t.Run(kind, func(t *testing.T) {
 			bad := s
 			bad.Profiles = append([]SavedProfile(nil), s.Profiles...)
 			switch kind {
 			case "version":
 				bad.Version = 2
+			case "cache-days":
+				bad.CacheRetentionDays = 0
+			case "cache-file":
+				bad.CacheMaxFileBytes = 0
+			case "cache-total":
+				bad.CacheMaxTotalBytes = bad.CacheMaxFileBytes - 1
 			case "duplicate-id":
 				p := savedFixture()
 				p.Profile.DriveLetter = "Y"

@@ -19,6 +19,7 @@ import (
 	"github.com/danhk0612/DK-Drive/internal/config"
 	"github.com/danhk0612/DK-Drive/internal/connection"
 	"github.com/danhk0612/DK-Drive/internal/credential"
+	"github.com/danhk0612/DK-Drive/internal/mount"
 	"golang.org/x/sys/windows"
 )
 
@@ -143,6 +144,9 @@ func Run(hidden bool) error {
 	if err != nil {
 		return err
 	}
+	if _, err := cacheStore.PruneExpired(s.CacheRetentionDays, time.Now()); err != nil {
+		return err
+	}
 	recoveryItems, err := cacheStore.Scan()
 	if err != nil {
 		return err
@@ -151,7 +155,12 @@ func Run(hidden bool) error {
 	if err != nil {
 		return err
 	}
-	w := &window{settings: s, filename: filename, manager: connection.New(connection.Mount), selected: -1, sessionSecrets: map[string]config.Secrets{}, results: make(chan taskResult, 1), recoveryItems: recoveryItems, cacheUsage: cacheUsage}
+	w := &window{settings: s, filename: filename, selected: -1, sessionSecrets: map[string]config.Secrets{}, results: make(chan taskResult, 1), recoveryItems: recoveryItems, cacheUsage: cacheUsage}
+	w.manager = connection.New(func(ctx context.Context, profileID string, profile config.Profile, secrets config.Secrets) (connection.Session, error) {
+		return connection.MountWithCacheLimits(ctx, profileID, profile, secrets, mount.CacheLimits{
+			MaxFileBytes: w.settings.CacheMaxFileBytes, MaxTotalBytes: w.settings.CacheMaxTotalBytes,
+		})
+	})
 	active = w
 	defer func() { active = nil }()
 	call("SetProcessDPIAware")
@@ -450,7 +459,7 @@ func (w *window) build() error {
 	w.disconnectAllButton = button("전체 해제", 306, 390, 282, idDisconnectAll)
 	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 435, 300, idCloseToTray)
 	w.startup = checkbox("Windows 로그인 시 실행", 16, 463, 300, idStartup)
-	w.cacheButton = button("보존 캐시", 16, 500, 282, idRecovery)
+	w.cacheButton = button("캐시 관리", 16, 500, 282, idRecovery)
 	w.exitButton = button("프로그램 종료", 306, 500, 282, idExit)
 	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 16, 540, 572, 50, 0)
 	w.setTabOrder([]uintptr{
@@ -864,7 +873,7 @@ func (w *window) updateActionButtons() {
 }
 
 func (w *window) updateRecoveryButton() {
-	setText(w.cacheButton, fmt.Sprintf("보존 캐시 (%d · %s)", len(w.recoveryItems), formatByteSize(w.cacheUsage.RecoveryBytes)))
+	setText(w.cacheButton, fmt.Sprintf("캐시 관리 (%d · %s)", len(w.recoveryItems), formatByteSize(w.cacheUsage.RecoveryBytes)))
 }
 
 func profileDiagnosticText(diagnostic connection.Diagnostic, usage localcache.ProfileUsage) string {

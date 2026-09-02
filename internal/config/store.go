@@ -26,12 +26,22 @@ type SavedProfile struct {
 }
 
 type Settings struct {
-	Version     int
-	CloseToTray bool
-	Profiles    []SavedProfile
+	Version            int
+	CloseToTray        bool
+	CacheRetentionDays int
+	CacheMaxFileBytes  int64
+	CacheMaxTotalBytes int64
+	Profiles           []SavedProfile
 }
 
-func DefaultSettings() Settings { return Settings{Version: 1, CloseToTray: true} }
+func DefaultSettings() Settings {
+	return Settings{
+		Version: 1, CloseToTray: true,
+		CacheRetentionDays: 30,
+		CacheMaxFileBytes:  10 << 30,
+		CacheMaxTotalBytes: 50 << 30,
+	}
+}
 
 func NewID() (string, error) {
 	var data [16]byte
@@ -44,6 +54,18 @@ func NewID() (string, error) {
 func (s Settings) Validate() error {
 	if s.Version != 1 {
 		return errors.New("지원하지 않는 설정 버전입니다; 기존 파일을 유지합니다")
+	}
+	if s.CacheRetentionDays <= 0 {
+		return errors.New("캐시 보관 기간은 1일 이상이어야 합니다")
+	}
+	if s.CacheMaxFileBytes <= 0 || s.CacheMaxTotalBytes <= 0 {
+		return errors.New("캐시 파일당·전체 최대 용량은 0보다 커야 합니다")
+	}
+	if s.CacheMaxFileBytes%(1<<30) != 0 || s.CacheMaxTotalBytes%(1<<30) != 0 {
+		return errors.New("캐시 파일당·전체 최대 용량은 GB 단위로 설정해야 합니다")
+	}
+	if s.CacheMaxFileBytes > s.CacheMaxTotalBytes {
+		return errors.New("캐시 파일당 최대 용량은 전체 최대 용량보다 클 수 없습니다")
 	}
 	ids, drives := map[string]bool{}, map[string]bool{}
 	for _, p := range s.Profiles {
@@ -111,7 +133,7 @@ func LoadSettings(filename string) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	var s Settings
+	s := DefaultSettings()
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&s); err != nil {

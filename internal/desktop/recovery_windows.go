@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +30,7 @@ const (
 	idRecoveryRetry
 	idRecoveryDelete
 	idRecoveryClose
+	idRecoverySettingsSave
 	wmRecoveryDone = 0x8004
 )
 
@@ -55,6 +57,13 @@ type recoveryDialog struct {
 	retryButton       uintptr
 	deleteButton      uintptr
 	closeButton       uintptr
+	retentionLabel    uintptr
+	retentionInput    uintptr
+	fileLimitLabel    uintptr
+	fileLimitInput    uintptr
+	totalLimitLabel   uintptr
+	totalLimitInput   uintptr
+	settingsSave      uintptr
 	retryResults      chan recoveryRetryResult
 }
 
@@ -104,15 +113,15 @@ func showRecoveryDialog(owner *window) error {
 		}
 		recoveryClassRegistered = true
 	}
-	title := utf("DK-Drive — 보존 캐시 복구")
+	title := utf("DK-Drive — 캐시 관리")
 	className := utf(recoveryClassName)
 	h, _, createErr := user32.NewProc("CreateWindowExW").Call(
 		0x10000, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)),
 		wsOverlappedWindow, 0x80000000, 0x80000000,
-		uintptr(dialog.px(920)), uintptr(dialog.px(620)), owner.hwnd, 0, uintptr(instance), 0,
+		uintptr(dialog.px(920)), uintptr(dialog.px(680)), owner.hwnd, 0, uintptr(instance), 0,
 	)
 	if h == 0 {
-		return fmt.Errorf("보존 캐시 복구 창 생성 실패: %w", createErr)
+		return fmt.Errorf("캐시 관리 창 생성 실패: %w", createErr)
 	}
 	dialog.hwnd = h
 	activeRecovery = dialog
@@ -170,16 +179,29 @@ func (dialog *recoveryDialog) build() error {
 		}
 	}
 	dialog.detail = add("EDIT", "", 0x800000|0x800|4|0x40, 16, 386, 870, 130, 0)
-	dialog.refreshButton = add("BUTTON", "새로 고침", 0, 16, 532, 90, 30, idRecoveryRefresh)
-	dialog.folderButton = add("BUTTON", "폴더 열기", 0, 114, 532, 110, 30, idRecoveryFolder)
-	dialog.exportButton = add("BUTTON", "선택 항목 내보내기…", 0, 232, 532, 150, 30, idRecoveryExport)
-	dialog.retryButton = add("BUTTON", "원격 재시도", 0, 390, 532, 110, 30, idRecoveryRetry)
-	dialog.deleteButton = add("BUTTON", "선택 항목 삭제", 0, 508, 532, 110, 30, idRecoveryDelete)
-	dialog.closeButton = add("BUTTON", "닫기", bsDefault, 798, 532, 90, 30, idRecoveryClose)
+	dialog.retentionLabel = add("STATIC", "보관 기간(일)", 0, 16, 532, 94, 24, 0)
+	dialog.retentionInput = add("EDIT", strconv.Itoa(dialog.ownerWindow.settings.CacheRetentionDays), 0x800000|0x80|0x2000, 110, 530, 58, 24, 0)
+	dialog.fileLimitLabel = add("STATIC", "파일당 최대(GB)", 0, 190, 532, 110, 24, 0)
+	dialog.fileLimitInput = add("EDIT", strconv.FormatInt(dialog.ownerWindow.settings.CacheMaxFileBytes>>30, 10), 0x800000|0x80|0x2000, 300, 530, 70, 24, 0)
+	dialog.totalLimitLabel = add("STATIC", "전체 최대(GB)", 0, 392, 532, 100, 24, 0)
+	dialog.totalLimitInput = add("EDIT", strconv.FormatInt(dialog.ownerWindow.settings.CacheMaxTotalBytes>>30, 10), 0x800000|0x80|0x2000, 492, 530, 70, 24, 0)
+	dialog.settingsSave = add("BUTTON", "설정 저장", 0, 580, 528, 110, 28, idRecoverySettingsSave)
+	dialog.refreshButton = add("BUTTON", "새로 고침", 0, 16, 574, 90, 30, idRecoveryRefresh)
+	dialog.folderButton = add("BUTTON", "폴더 열기", 0, 114, 574, 110, 30, idRecoveryFolder)
+	dialog.exportButton = add("BUTTON", "선택 항목 내보내기…", 0, 232, 574, 150, 30, idRecoveryExport)
+	dialog.retryButton = add("BUTTON", "원격 재시도", 0, 390, 574, 110, 30, idRecoveryRetry)
+	dialog.deleteButton = add("BUTTON", "선택 항목 삭제", 0, 508, 574, 110, 30, idRecoveryDelete)
+	dialog.closeButton = add("BUTTON", "닫기", bsDefault, 798, 574, 90, 30, idRecoveryClose)
 	return err
 }
 
 func (dialog *recoveryDialog) refresh() {
+	if !dialog.ownerWindow.anyConnected() {
+		if _, err := dialog.store.PruneExpired(dialog.ownerWindow.settings.CacheRetentionDays, time.Now()); err != nil {
+			alert(dialog.hwnd, err.Error())
+			return
+		}
+	}
 	items, err := dialog.store.Scan()
 	if err != nil {
 		alert(dialog.hwnd, err.Error())
@@ -228,10 +250,41 @@ func (dialog *recoveryDialog) syncOwner() {
 
 func (dialog *recoveryDialog) updateSummary() {
 	setText(dialog.summary, fmt.Sprintf(
-		"보존된 캐시는 자동 업로드·삭제하지 않습니다.\r\n전체 캐시 %s · 복구 목록 %d개/%s · 메타데이터 없는 항목 %d개/%s",
+		"보존 캐시는 자동 업로드하지 않으며 만료 항목만 자동 삭제합니다. 설정: %d일 · 파일당 %s · 전체 %s\r\n전체 캐시 %s · 복구 목록 %d개/%s · 메타데이터 없는 항목 %d개/%s",
+		dialog.ownerWindow.settings.CacheRetentionDays,
+		formatByteSize(dialog.ownerWindow.settings.CacheMaxFileBytes), formatByteSize(dialog.ownerWindow.settings.CacheMaxTotalBytes),
 		formatByteSize(dialog.usage.TotalBytes), dialog.usage.RecoveryItems, formatByteSize(dialog.usage.RecoveryBytes),
 		dialog.usage.UnclassifiedItems, formatByteSize(dialog.usage.UnclassifiedBytes),
 	))
+}
+
+func (dialog *recoveryDialog) saveSettings() {
+	days, daysErr := strconv.ParseInt(strings.TrimSpace(getText(dialog.retentionInput)), 10, 32)
+	fileGB, fileErr := strconv.ParseInt(strings.TrimSpace(getText(dialog.fileLimitInput)), 10, 32)
+	totalGB, totalErr := strconv.ParseInt(strings.TrimSpace(getText(dialog.totalLimitInput)), 10, 32)
+	if daysErr != nil || fileErr != nil || totalErr != nil || days <= 0 || fileGB <= 0 || totalGB <= 0 {
+		alert(dialog.hwnd, "보관 기간과 파일당·전체 최대 용량은 1 이상의 정수여야 합니다.")
+		return
+	}
+	if fileGB > totalGB {
+		alert(dialog.hwnd, "파일당 최대 용량은 전체 최대 용량보다 클 수 없습니다.")
+		return
+	}
+	next := dialog.ownerWindow.settings
+	next.CacheRetentionDays = int(days)
+	next.CacheMaxFileBytes = fileGB << 30
+	next.CacheMaxTotalBytes = totalGB << 30
+	if err := config.SaveSettings(dialog.ownerWindow.filename, next); err != nil {
+		alert(dialog.hwnd, err.Error())
+		return
+	}
+	dialog.ownerWindow.settings = next
+	dialog.refresh()
+	message := "캐시 설정을 저장했습니다.\n\n용량 제한은 새로 연결하는 드라이브부터 적용됩니다."
+	if dialog.ownerWindow.anyConnected() {
+		message += "\n만료 캐시 정리는 모든 드라이브를 해제한 뒤 실행됩니다."
+	}
+	box(dialog.hwnd, message, 0x40)
 }
 
 func (dialog *recoveryDialog) updateDetails() {
@@ -326,6 +379,10 @@ func (dialog *recoveryDialog) beginRetry(index int, profile config.SavedProfile,
 	call("EnableWindow", dialog.refreshButton, 0)
 	call("EnableWindow", dialog.exportButton, 0)
 	call("EnableWindow", dialog.deleteButton, 0)
+	call("EnableWindow", dialog.settingsSave, 0)
+	call("EnableWindow", dialog.retentionInput, 0)
+	call("EnableWindow", dialog.fileLimitInput, 0)
+	call("EnableWindow", dialog.totalLimitInput, 0)
 	call("EnableWindow", dialog.closeButton, 0)
 	item := dialog.items[index]
 	go func() {
@@ -352,6 +409,10 @@ func (dialog *recoveryDialog) beginRetry(index int, profile config.SavedProfile,
 func (dialog *recoveryDialog) finishRetry(result recoveryRetryResult) {
 	dialog.busy = false
 	call("EnableWindow", dialog.refreshButton, 1)
+	call("EnableWindow", dialog.settingsSave, 1)
+	call("EnableWindow", dialog.retentionInput, 1)
+	call("EnableWindow", dialog.fileLimitInput, 1)
+	call("EnableWindow", dialog.totalLimitInput, 1)
 	call("EnableWindow", dialog.closeButton, 1)
 	dialog.updateDetails()
 	if result.err != nil {
@@ -571,7 +632,7 @@ func (dialog *recoveryDialog) deleteSelected() {
 }
 
 func (dialog *recoveryDialog) resize(width, height int32) {
-	minimumWidth, minimumHeight := dialog.px(800), dialog.px(500)
+	minimumWidth, minimumHeight := dialog.px(800), dialog.px(560)
 	if width < minimumWidth || height < minimumHeight {
 		return
 	}
@@ -579,12 +640,20 @@ func (dialog *recoveryDialog) resize(width, height int32) {
 	listTop := dialog.px(54)
 	buttonHeight := dialog.px(30)
 	buttonY := height - dialog.px(58)
+	settingsY := buttonY - dialog.px(42)
 	detailHeight := dialog.px(130)
-	detailY := buttonY - dialog.px(16) - detailHeight
+	detailY := settingsY - dialog.px(16) - detailHeight
 	listHeight := detailY - dialog.px(14) - listTop
 	call("MoveWindow", dialog.summary, uintptr(margin), uintptr(dialog.px(10)), uintptr(width-2*margin), uintptr(dialog.px(40)), 1)
 	call("MoveWindow", dialog.list, uintptr(margin), uintptr(listTop), uintptr(width-2*margin), uintptr(listHeight), 1)
 	call("MoveWindow", dialog.detail, uintptr(margin), uintptr(detailY), uintptr(width-2*margin), uintptr(detailHeight), 1)
+	call("MoveWindow", dialog.retentionLabel, uintptr(margin), uintptr(settingsY+dialog.px(2)), uintptr(dialog.px(94)), uintptr(dialog.px(24)), 1)
+	call("MoveWindow", dialog.retentionInput, uintptr(dialog.px(110)), uintptr(settingsY), uintptr(dialog.px(58)), uintptr(dialog.px(24)), 1)
+	call("MoveWindow", dialog.fileLimitLabel, uintptr(dialog.px(190)), uintptr(settingsY+dialog.px(2)), uintptr(dialog.px(110)), uintptr(dialog.px(24)), 1)
+	call("MoveWindow", dialog.fileLimitInput, uintptr(dialog.px(300)), uintptr(settingsY), uintptr(dialog.px(70)), uintptr(dialog.px(24)), 1)
+	call("MoveWindow", dialog.totalLimitLabel, uintptr(dialog.px(392)), uintptr(settingsY+dialog.px(2)), uintptr(dialog.px(100)), uintptr(dialog.px(24)), 1)
+	call("MoveWindow", dialog.totalLimitInput, uintptr(dialog.px(492)), uintptr(settingsY), uintptr(dialog.px(70)), uintptr(dialog.px(24)), 1)
+	call("MoveWindow", dialog.settingsSave, uintptr(dialog.px(580)), uintptr(settingsY-dialog.px(2)), uintptr(dialog.px(110)), uintptr(dialog.px(28)), 1)
 	call("MoveWindow", dialog.refreshButton, uintptr(margin), uintptr(buttonY), uintptr(dialog.px(90)), uintptr(buttonHeight), 1)
 	call("MoveWindow", dialog.folderButton, uintptr(dialog.px(114)), uintptr(buttonY), uintptr(dialog.px(110)), uintptr(buttonHeight), 1)
 	call("MoveWindow", dialog.exportButton, uintptr(dialog.px(232)), uintptr(buttonY), uintptr(dialog.px(150)), uintptr(buttonHeight), 1)
@@ -615,6 +684,8 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 			dialog.deleteSelected()
 		case idRecoveryClose:
 			dialog.close()
+		case idRecoverySettingsSave:
+			dialog.saveSettings()
 		}
 		return 0
 	case wmRecoveryDone:
@@ -637,7 +708,7 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 		if lp != 0 {
 			pointer := *(*unsafe.Pointer)(unsafe.Pointer(&lp))
 			limits := (*minMaxInfo)(pointer)
-			limits.MinTrackSize = point{X: dialog.px(800), Y: dialog.px(500)}
+			limits.MinTrackSize = point{X: dialog.px(800), Y: dialog.px(560)}
 			return 0
 		}
 	case wmClose:
