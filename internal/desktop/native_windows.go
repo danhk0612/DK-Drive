@@ -414,7 +414,7 @@ func (w *window) createControl(class, text string, style uintptr, x, y, width, h
 func (w *window) tray(add bool) bool {
 	n := notifyIcon{Window: w.hwnd, ID: 1, Flags: 1 | 2 | 4, Callback: wmTray, Icon: w.icon}
 	n.Size = uint32(unsafe.Sizeof(n))
-	copy(n.Tip[:], windows.StringToUTF16("DK-Drive — 드라이브 관리"))
+	copy(n.Tip[:], windows.StringToUTF16(trayTooltip(w.settings.Profiles, w.manager.State)))
 	op := uintptr(2)
 	if add {
 		op = 0
@@ -426,6 +426,16 @@ func (w *window) tray(add bool) bool {
 	}
 	w.hasTray = add && r != 0
 	return r != 0
+}
+
+func (w *window) updateTrayTooltip() {
+	if !w.hasTray {
+		return
+	}
+	n := notifyIcon{Window: w.hwnd, ID: 1, Flags: 4}
+	n.Size = uint32(unsafe.Sizeof(n))
+	copy(n.Tip[:], windows.StringToUTF16(trayTooltip(w.settings.Profiles, w.manager.State)))
+	shell32.NewProc("Shell_NotifyIconW").Call(1, uintptr(unsafe.Pointer(&n)))
 }
 
 func (w *window) show() { call("ShowWindow", w.hwnd, 9); call("SetForegroundWindow", w.hwnd) }
@@ -460,9 +470,9 @@ func (w *window) trayMenu() {
 	}
 	add(drives, 0x800, 0, "")
 	add(drives, 0, idNew, "드라이브 추가")
-	add(drives, 0, idConnectAll, "모든 드라이브 연결")
-	add(drives, 0, idDisconnectAll, "모든 드라이브 해제")
-	add(cacheMenu, 0, idOpenCacheFolder, "캐시 폴더 열기")
+	add(drives, 0, idConnectAll, "전체 연결")
+	add(drives, 0, idDisconnectAll, "전체 해제")
+	add(cacheMenu, 0, idOpenCacheFolder, "폴더 열기")
 	add(cacheMenu, 0, idClearCache, "캐시 정리")
 
 	add(menu, 0, idShow, "DK-Drive 실행")
