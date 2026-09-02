@@ -17,7 +17,7 @@ const profileEditorClassName = "DKDrive.ProfileEditor.0_6"
 var (
 	activeProfileEditor          *profileEditorDialog
 	profileEditorClassRegistered bool
-	profileEditorWndProcCallback = syscall.NewCallback(profileEditorWndProc)
+	profileEditorWndProcCallback uintptr
 )
 
 type profileEditorDialog struct {
@@ -37,6 +37,7 @@ func showProfileEditor(owner *window, index int) error {
 		return err
 	}
 	if !profileEditorClassRegistered {
+		profileEditorWndProcCallback = syscall.NewCallback(profileEditorWndProc)
 		class := windowClass{
 			Size: uint32(unsafe.Sizeof(windowClass{})), Proc: profileEditorWndProcCallback,
 			Instance: uintptr(instance), Icon: owner.icon, SmallIcon: owner.smallIcon,
