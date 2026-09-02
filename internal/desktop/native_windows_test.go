@@ -52,7 +52,7 @@ func TestDesktopScale(t *testing.T) {
 	}{
 		{name: "100 percent", dpi: 96, width: 1920, height: 1080, want: 1},
 		{name: "150 percent", dpi: 144, width: 2560, height: 1440, want: 1.5},
-		{name: "200 percent fitted", dpi: 192, width: 1920, height: 1080, want: float64(1056) / 680},
+		{name: "200 percent fitted", dpi: 192, width: 1920, height: 1080, want: float64(1056) / 670},
 		{name: "invalid DPI", width: 1920, height: 1080, want: 1},
 	}
 	for _, tt := range tests {
@@ -74,11 +74,10 @@ func TestLayoutRulesAndResize(t *testing.T) {
 		wantLeft, wantTop       int32
 		wantRight, wantBottom   int32
 	}{
-		{name: "list grows vertically", class: "SysListView32", x: 16, y: 40, width: 430, height: 348, id: idList, wantRule: layoutGrowY, wantLeft: 16, wantTop: 40, wantRight: 446, wantBottom: 488},
-		{name: "left button follows bottom", class: "BUTTON", x: 16, y: 400, width: 130, height: 28, wantRule: layoutMoveY, wantLeft: 16, wantTop: 500, wantRight: 146, wantBottom: 528},
-		{name: "field grows horizontally", class: "EDIT", x: 590, y: 108, width: 490, height: 24, wantRule: layoutGrowX, wantLeft: 590, wantTop: 108, wantRight: 1180, wantBottom: 132},
-		{name: "right button follows edge", class: "BUTTON", x: 1000, y: 242, width: 80, height: 28, wantRule: layoutMoveX, wantLeft: 1100, wantTop: 242, wantRight: 1180, wantBottom: 270},
-		{name: "status grows both ways", class: "EDIT", x: 470, y: 540, width: 610, height: 70, wantRule: layoutGrowX | layoutGrowY, wantLeft: 470, wantTop: 540, wantRight: 1180, wantBottom: 710},
+		{name: "list grows both ways", class: "SysListView32", x: 16, y: 40, width: 588, height: 300, id: idList, wantRule: layoutGrowX | layoutGrowY, wantLeft: 16, wantTop: 40, wantRight: 704, wantBottom: 440},
+		{name: "action follows bottom", class: "BUTTON", x: 16, y: 352, width: 108, height: 28, wantRule: layoutMoveY, wantLeft: 16, wantTop: 452, wantRight: 124, wantBottom: 480},
+		{name: "top label stays fixed", class: "STATIC", x: 16, y: 14, width: 240, height: 22, wantRule: 0, wantLeft: 16, wantTop: 14, wantRight: 256, wantBottom: 36},
+		{name: "status grows and follows bottom", class: "EDIT", x: 16, y: 540, width: 572, height: 50, wantRule: layoutMoveY | layoutGrowX, wantLeft: 16, wantTop: 640, wantRight: 688, wantBottom: 690},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -346,7 +345,25 @@ func TestAppIconBits(t *testing.T) {
 
 func TestTrayProfileLabel(t *testing.T) {
 	saved := config.SavedProfile{Profile: config.Profile{DriveLetter: "x", Name: "NAS WebDAV"}}
-	if got := trayProfileLabel(saved, "연결됨"); got != "X: NAS WebDAV — 연결됨" {
+	if got := trayProfileLabel(saved, "연결됨"); got != "[O] X: NAS WebDAV" {
 		t.Fatalf("tray label: %q", got)
+	}
+	if got := trayProfileLabel(saved, "연결 중"); got != "[X] X: NAS WebDAV" {
+		t.Fatalf("connecting tray label: %q", got)
+	}
+}
+
+func TestTrayTooltip(t *testing.T) {
+	profiles := []config.SavedProfile{
+		{ID: "e", Profile: config.Profile{DriveLetter: "e"}},
+		{ID: "c", Profile: config.Profile{DriveLetter: "C:"}},
+		{ID: "d", Profile: config.Profile{DriveLetter: "d"}},
+	}
+	states := map[string]string{"e": "연결됨", "c": "연결됨", "d": "연결 안 됨"}
+	if got := trayTooltip(profiles, func(id string) string { return states[id] }); got != "DK-Drive [C E]" {
+		t.Fatalf("tray tooltip: %q", got)
+	}
+	if got := trayTooltip(profiles, func(string) string { return "연결 안 됨" }); got != "DK-Drive" {
+		t.Fatalf("empty tray tooltip: %q", got)
 	}
 }

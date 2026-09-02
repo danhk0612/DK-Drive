@@ -32,7 +32,11 @@ const (
 	wmRecoveryDone = 0x8004
 )
 
-var activeRecovery *recoveryDialog
+var (
+	activeRecovery          *recoveryDialog
+	recoveryClassRegistered bool
+	recoveryWndProcCallback = syscall.NewCallback(recoveryWndProc)
+)
 
 type recoveryDialog struct {
 	hwnd, owner, font uintptr
@@ -57,6 +61,8 @@ type recoveryDialog struct {
 type recoveryRetryResult struct {
 	itemIndex int
 	target    string
+	profile   config.SavedProfile
+	secrets   config.Secrets
 	state     remoterecovery.RemoteState
 	entry     vfs.Entry
 	uploaded  bool
@@ -64,6 +70,11 @@ type recoveryRetryResult struct {
 }
 
 func showRecoveryDialog(owner *window) error {
+	if activeRecovery != nil && call("IsWindow", activeRecovery.hwnd) != 0 {
+		call("ShowWindow", activeRecovery.hwnd, 5)
+		call("SetForegroundWindow", activeRecovery.hwnd)
+		return nil
+	}
 	store, err := localcache.New("")
 	if err != nil {
 		return err
@@ -82,18 +93,21 @@ func showRecoveryDialog(owner *window) error {
 	if err := windows.GetModuleHandleEx(0, nil, &instance); err != nil {
 		return err
 	}
-	class := windowClass{
-		Size: uint32(unsafe.Sizeof(windowClass{})), Proc: syscall.NewCallback(recoveryWndProc),
-		Instance: uintptr(instance), Icon: owner.icon, SmallIcon: owner.smallIcon,
-		Cursor: call("LoadCursorW", 0, 32512), Background: 16, Name: utf(recoveryClassName),
+	if !recoveryClassRegistered {
+		class := windowClass{
+			Size: uint32(unsafe.Sizeof(windowClass{})), Proc: recoveryWndProcCallback,
+			Instance: uintptr(instance), Icon: owner.icon, SmallIcon: owner.smallIcon,
+			Cursor: call("LoadCursorW", 0, 32512), Background: 16, Name: utf(recoveryClassName),
+		}
+		if call("RegisterClassExW", uintptr(unsafe.Pointer(&class))) == 0 {
+			return errors.New("복구 창 클래스 등록 실패")
+		}
+		recoveryClassRegistered = true
 	}
-	if call("RegisterClassExW", uintptr(unsafe.Pointer(&class))) == 0 {
-		return errors.New("복구 창 클래스 등록 실패")
-	}
-	defer call("UnregisterClassW", uintptr(unsafe.Pointer(class.Name)), uintptr(instance))
 	title := utf("DK-Drive — 보존 캐시 복구")
+	className := utf(recoveryClassName)
 	h, _, createErr := user32.NewProc("CreateWindowExW").Call(
-		0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)),
+		0x10000, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)),
 		wsOverlappedWindow, 0x80000000, 0x80000000,
 		uintptr(dialog.px(920)), uintptr(dialog.px(620)), owner.hwnd, 0, uintptr(instance), 0,
 	)
@@ -102,39 +116,13 @@ func showRecoveryDialog(owner *window) error {
 	}
 	dialog.hwnd = h
 	activeRecovery = dialog
-	defer func() { activeRecovery = nil }()
 	if err := dialog.build(); err != nil {
 		call("DestroyWindow", h)
 		return err
 	}
 	dialog.refresh()
-	call("EnableWindow", owner.hwnd, 0)
-	defer func() {
-		call("EnableWindow", owner.hwnd, 1)
-		call("SetForegroundWindow", owner.hwnd)
-		owner.recoveryItems = dialog.items
-		owner.cacheUsage = dialog.usage
-		owner.updateRecoveryButton()
-	}()
 	call("ShowWindow", h, 5)
 	call("SetForegroundWindow", h)
-	var msg message
-	for call("IsWindow", h) != 0 {
-		result := int32(call("GetMessageW", uintptr(unsafe.Pointer(&msg)), 0, 0, 0))
-		if result == -1 {
-			call("DestroyWindow", h)
-			return errors.New("복구 창 메시지 처리 실패")
-		}
-		if result == 0 {
-			call("DestroyWindow", h)
-			call("PostQuitMessage", 0)
-			break
-		}
-		if call("IsDialogMessageW", h, uintptr(unsafe.Pointer(&msg))) == 0 {
-			call("TranslateMessage", uintptr(unsafe.Pointer(&msg)))
-			call("DispatchMessageW", uintptr(unsafe.Pointer(&msg)))
-		}
-	}
 	return nil
 }
 
@@ -183,7 +171,7 @@ func (dialog *recoveryDialog) build() error {
 	}
 	dialog.detail = add("EDIT", "", 0x800000|0x800|4|0x40, 16, 386, 870, 130, 0)
 	dialog.refreshButton = add("BUTTON", "새로 고침", 0, 16, 532, 90, 30, idRecoveryRefresh)
-	dialog.folderButton = add("BUTTON", "캐시 폴더 열기", 0, 114, 532, 110, 30, idRecoveryFolder)
+	dialog.folderButton = add("BUTTON", "폴더 열기", 0, 114, 532, 110, 30, idRecoveryFolder)
 	dialog.exportButton = add("BUTTON", "선택 항목 내보내기…", 0, 232, 532, 150, 30, idRecoveryExport)
 	dialog.retryButton = add("BUTTON", "원격 재시도", 0, 390, 532, 110, 30, idRecoveryRetry)
 	dialog.deleteButton = add("BUTTON", "선택 항목 삭제", 0, 508, 532, 110, 30, idRecoveryDelete)
@@ -204,6 +192,7 @@ func (dialog *recoveryDialog) refresh() {
 		return
 	}
 	dialog.usage = usage
+	dialog.syncOwner()
 	dialog.updateSummary()
 	if dialog.selected >= len(items) {
 		dialog.selected = -1
@@ -229,6 +218,12 @@ func (dialog *recoveryDialog) refresh() {
 	}
 	listViewSelect(dialog.list, dialog.selected)
 	dialog.updateDetails()
+}
+
+func (dialog *recoveryDialog) syncOwner() {
+	dialog.ownerWindow.recoveryItems = dialog.items
+	dialog.ownerWindow.cacheUsage = dialog.usage
+	dialog.ownerWindow.updateRecoveryButton()
 }
 
 func (dialog *recoveryDialog) updateSummary() {
@@ -334,7 +329,7 @@ func (dialog *recoveryDialog) beginRetry(index int, profile config.SavedProfile,
 	call("EnableWindow", dialog.closeButton, 0)
 	item := dialog.items[index]
 	go func() {
-		result := recoveryRetryResult{itemIndex: index, target: target}
+		result := recoveryRetryResult{itemIndex: index, target: target, profile: profile, secrets: secrets}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		backend, err := connection.OpenBackend(ctx, profile.Profile, secrets)
@@ -381,21 +376,11 @@ func (dialog *recoveryDialog) finishRetry(result recoveryRetryResult) {
 			"\n로컬 수정 시각: " + formatRecoveryTime(item.Metadata.UpdatedAt) +
 			"\n\n예: 기존 원격 파일 덮어쓰기\n아니요: 다른 이름으로 전송 (" + alternate + ")\n취소: 건너뛰기"
 		choice := box(dialog.hwnd, message, 0x203)
-		profile, profileErr := dialog.retryProfile(item)
-		if profileErr != nil {
-			alert(dialog.hwnd, profileErr.Error())
-			return
-		}
-		secrets, secretErr := dialog.ownerWindow.secrets(profile)
-		if secretErr != nil {
-			alert(dialog.hwnd, secretErr.Error())
-			return
-		}
 		switch choice {
 		case 6:
-			dialog.beginRetry(result.itemIndex, profile, secrets, result.target, false)
+			dialog.beginRetry(result.itemIndex, result.profile, result.secrets, result.target, false)
 		case 7:
-			dialog.beginRetry(result.itemIndex, profile, secrets, alternate, true)
+			dialog.beginRetry(result.itemIndex, result.profile, result.secrets, alternate, true)
 		}
 	}
 }
@@ -657,6 +642,12 @@ func recoveryWndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 		}
 	case wmClose:
 		dialog.close()
+		return 0
+	case wmDestroy:
+		dialog.syncOwner()
+		if activeRecovery == dialog {
+			activeRecovery = nil
+		}
 		return 0
 	}
 	return call("DefWindowProcW", h, uintptr(msg), wp, lp)

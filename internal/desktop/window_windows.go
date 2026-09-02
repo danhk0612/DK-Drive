@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,6 +25,7 @@ import (
 const (
 	idList = 100 + iota
 	idNew
+	idEditProfile
 	idSave
 	idDelete
 	idConnect
@@ -44,6 +46,7 @@ const (
 	idRecovery
 	idOpenCacheFolder
 	idClearCache
+	idProfileClose
 )
 
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
@@ -93,7 +96,7 @@ type window struct {
 	controls                                                                             []uintptr
 	layout                                                                               []controlLayout
 	baseClientWidth, baseClientHeight, minTrackWidth, minTrackHeight                     int32
-	list, status, closeToTray, startup, newButton, saveButton                            uintptr
+	list, status, closeToTray, startup, newButton, editButton, saveButton                uintptr
 	testButton                                                                           uintptr
 	authHint                                                                             uintptr
 	exitButton, cacheButton                                                              uintptr
@@ -184,7 +187,7 @@ func Run(hidden bool) error {
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(class.Name)), uintptr(instance))
 	title := utf("DK-Drive " + app.Version + " — 연결 관리")
-	h, _, createErr := user32.NewProc("CreateWindowExW").Call(0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)), wsOverlappedWindow, 0x80000000, 0x80000000, uintptr(w.px(1150)), uintptr(w.px(680)), 0, 0, uintptr(instance), 0)
+	h, _, createErr := user32.NewProc("CreateWindowExW").Call(0x10000, uintptr(unsafe.Pointer(class.Name)), uintptr(unsafe.Pointer(title)), wsOverlappedWindow, 0x80000000, 0x80000000, uintptr(w.px(650)), uintptr(w.px(670)), 0, 0, uintptr(instance), 0)
 	runtime.KeepAlive(title)
 	if h == 0 {
 		return fmt.Errorf("창 생성 실패: %w", createErr)
@@ -213,9 +216,8 @@ func Run(hidden bool) error {
 		w.show()
 	}
 	w.refreshList()
-	w.newProfile()
 	if !hidden || !w.hasTray {
-		call("SetFocus", w.name)
+		call("SetFocus", w.list)
 	}
 	call("PostMessageW", h, wmAutoConnect, 0, 0)
 	var msg message
@@ -226,6 +228,23 @@ func Run(hidden bool) error {
 		}
 		if r == 0 {
 			break
+		}
+		if activeProfileEditor != nil && (msg.Window == activeProfileEditor.hwnd || call("IsChild", activeProfileEditor.hwnd, msg.Window) != 0) {
+			if activeProfileEditor.owner.handleKeyboardMessage(&msg) {
+				continue
+			}
+			if call("IsDialogMessageW", activeProfileEditor.hwnd, uintptr(unsafe.Pointer(&msg))) == 0 {
+				call("TranslateMessage", uintptr(unsafe.Pointer(&msg)))
+				call("DispatchMessageW", uintptr(unsafe.Pointer(&msg)))
+			}
+			continue
+		}
+		if activeRecovery != nil && (msg.Window == activeRecovery.hwnd || call("IsChild", activeRecovery.hwnd, msg.Window) != 0) {
+			if call("IsDialogMessageW", activeRecovery.hwnd, uintptr(unsafe.Pointer(&msg))) == 0 {
+				call("TranslateMessage", uintptr(unsafe.Pointer(&msg)))
+				call("DispatchMessageW", uintptr(unsafe.Pointer(&msg)))
+			}
+			continue
 		}
 		if w.handleKeyboardMessage(&msg) {
 			continue
@@ -240,35 +259,35 @@ func Run(hidden bool) error {
 
 func (w *window) px(v int) int32 { return int32(float64(v) * w.scale) }
 
+func (w *window) dialogOwner() uintptr {
+	if activeProfileEditor != nil && activeProfileEditor.owner == w {
+		return activeProfileEditor.hwnd
+	}
+	return w.hwnd
+}
+
 func desktopScale(dpi uint32, workWidth, workHeight int32) float64 {
 	scale := float64(dpi) / 96
 	if scale <= 0 {
 		scale = 1
 	}
 	if workWidth > 24 && workHeight > 24 {
-		scale = min(scale, float64(workWidth-24)/1150, float64(workHeight-24)/680)
+		scale = min(scale, float64(workWidth-24)/650, float64(workHeight-24)/670)
 	}
 	return max(scale, 0.75)
 }
 
 func layoutRuleFor(class string, x, y, width, id int) layoutRule {
 	if id == idList {
-		return layoutGrowY
-	}
-	if class == "EDIT" && x == 470 && y == 540 {
 		return layoutGrowX | layoutGrowY
 	}
-	var rule layoutRule
-	if x < 470 && y >= 400 {
-		rule |= layoutMoveY
+	if class == "EDIT" && y == 540 {
+		return layoutMoveY | layoutGrowX
 	}
-	if x >= 890 {
-		rule |= layoutMoveX
+	if y >= 352 {
+		return layoutMoveY
 	}
-	if x == 590 || (x == 470 && width >= 440) || (x == 680 && width >= 370) {
-		rule |= layoutGrowX
-	}
-	return rule
+	return 0
 }
 
 func resizeBounds(bounds rect, rule layoutRule, deltaX, deltaY int32) rect {
@@ -362,7 +381,7 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 			}
 			return 0
 		case 0x11: // WM_QUERYENDSESSION: never discard live mounts during logoff.
-			if w.busy || w.anyConnected() {
+			if w.busy || (activeRecovery != nil && activeRecovery.busy) || w.anyConnected() {
 				w.show()
 				setText(w.status, "Windows 종료 전에 DK-Drive에서 모든 드라이브를 해제하고 종료하세요.")
 				return 0
@@ -405,15 +424,6 @@ func (w *window) build() error {
 		return h
 	}
 	label := func(text string, x, y, ww int) { add("STATIC", text, 0, x, y, ww, 22, 0) }
-	edit := func(text string, x, y, ww int, secret bool) uintptr {
-		style := uintptr(0x10000 | 0x800000 | 0x80)
-		if secret {
-			style |= 0x20
-		}
-		h := add("EDIT", text, style, x, y, ww, 24, 0)
-		send(h, 0xc5, 4096, 0)
-		return h
-	}
 	button := func(text string, x, y, ww, id int) uintptr {
 		return add("BUTTON", text, 0x10000, x, y, ww, 28, id)
 	}
@@ -421,78 +431,30 @@ func (w *window) build() error {
 		return add("BUTTON", text, 0x10000|bsCheck, x, y, ww, 25, id)
 	}
 	label("등록된 연결", 16, 14, 240)
-	w.list = add("SysListView32", "", 0x10000|0x800000|0x0001|0x0004|0x0008, 16, 40, 430, 348, idList)
+	w.list = add("SysListView32", "", 0x10000|0x800000|0x0001|0x0004|0x0008, 16, 40, 588, 300, idList)
 	send(w.list, lvmSetExtendedListViewStyle, 0, 0x1|0x20|0x10000)
 	for i, column := range []struct {
 		title string
 		width int
-	}{{"드라이브", 58}, {"연결 이름", 165}, {"프로토콜", 105}, {"상태", 98}} {
+	}{{"드라이브", 70}, {"연결 이름", 225}, {"프로토콜", 135}, {"상태", 140}} {
 		if !listViewAddColumn(w.list, i, int(w.px(column.width)), column.title) {
 			return errors.New("프로필 목록 열 생성 실패")
 		}
 	}
-	w.newButton = button("새 연결", 16, 400, 130, idNew)
-	w.deleteButton = button("삭제", 166, 400, 130, idDelete)
-	w.saveButton = button("저장", 316, 400, 130, idSave)
-	w.connectButton = button("선택 연결", 16, 438, 205, idConnect)
-	w.disconnectButton = button("선택 해제", 241, 438, 205, idDisconnect)
-	w.connectAllButton = button("모두 연결", 16, 476, 205, idConnectAll)
-	w.disconnectAllButton = button("모두 해제", 241, 476, 205, idDisconnectAll)
-	label("연결 설정 — 저장 후 연결하세요", 470, 14, 440)
-	w.testButton = add("BUTTON", "연결 테스트", 0x10000|bsDefault, 930, 6, 150, 28, idTestConnection)
-	label("연결 이름", 470, 42, 110)
-	w.name = edit("", 590, 40, 280, false)
-	label("드라이브", 890, 42, 80)
-	w.drive = add("COMBOBOX", "", 0x10000|0x200000|3, 980, 40, 100, 400, idDrive)
-	label("프로토콜", 470, 76, 110)
-	w.protocol = add("COMBOBOX", "", 0x10000|0x200000|3, 590, 74, 280, 240, idProtocol)
-	for _, s := range protocols {
-		sendText(w.protocol, cbAddString, s)
-	}
-	label("포트", 890, 76, 80)
-	w.port = edit("22", 980, 74, 100, false)
-	fields := []struct {
-		name   string
-		target *uintptr
-	}{{"호스트", &w.host}, {"원격 시작 경로", &w.root}, {"사용자명", &w.user}, {"SFTP 개인키", &w.key}, {"known_hosts", &w.knownHosts}, {"비밀번호", &w.password}, {"키 Passphrase", &w.passphrase}}
-	for i, f := range fields {
-		y := 108 + i*34
-		label(f.name, 470, y+2, 115)
-		width := 490
-		if i >= 3 {
-			width = 400
-		}
-		*f.target = edit("", 590, y, width, i >= 5)
-		if i == 3 {
-			w.keyBrowse = button("찾아보기…", 1000, y-2, 80, idBrowseKey)
-		}
-		if i == 4 {
-			w.knownHostsBrowse = button("찾아보기…", 1000, y-2, 80, idBrowseKnownHosts)
-		}
-		if i == 5 {
-			w.passwordToggle = button("보기", 1000, y-2, 80, idTogglePassword)
-		}
-		if i == 6 {
-			w.passphraseToggle = button("보기", 1000, y-2, 80, idTogglePassphrase)
-		}
-	}
-	w.readOnly = checkbox("읽기 전용", 470, 352, 160, 0)
-	w.autoConnect = checkbox("프로그램 시작 시 자동 연결", 680, 352, 370, 0)
-	w.remember = checkbox("비밀번호·Passphrase 저장 (현재 Windows 사용자용 암호화)", 470, 382, 620, 0)
-	w.insecure = checkbox("TLS 인증서 검증 건너뛰기 (신뢰할 수 있는 테스트 서버 전용)", 470, 412, 620, 0)
-	w.authHint = add("STATIC", "", 0, 470, 447, 620, 22, 0)
-	label("FTP/HTTP는 평문 전송. 강제 해제 시 미저장 데이터가 손실될 수 있습니다.", 470, 471, 620)
-	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 520, 300, idCloseToTray)
-	w.startup = checkbox("Windows 로그인 시 실행", 16, 547, 300, idStartup)
-	w.cacheButton = button("보존 캐시", 16, 580, 205, idRecovery)
-	w.exitButton = button("프로그램 종료", 241, 580, 205, idExit)
-	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 470, 540, 610, 70, 0)
+	w.newButton = button("새 연결", 16, 352, 108, idNew)
+	w.editButton = button("설정", 132, 352, 108, idEditProfile)
+	w.deleteButton = button("삭제", 248, 352, 108, idDelete)
+	w.connectButton = button("선택 연결", 364, 352, 108, idConnect)
+	w.disconnectButton = button("선택 해제", 480, 352, 108, idDisconnect)
+	w.connectAllButton = button("전체 연결", 16, 390, 282, idConnectAll)
+	w.disconnectAllButton = button("전체 해제", 306, 390, 282, idDisconnectAll)
+	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 435, 300, idCloseToTray)
+	w.startup = checkbox("Windows 로그인 시 실행", 16, 463, 300, idStartup)
+	w.cacheButton = button("보존 캐시", 16, 500, 282, idRecovery)
+	w.exitButton = button("프로그램 종료", 306, 500, 282, idExit)
+	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 16, 540, 572, 50, 0)
 	w.setTabOrder([]uintptr{
-		w.list, w.newButton, w.name, w.drive, w.protocol, w.port, w.host, w.root, w.user,
-		w.key, w.keyBrowse, w.knownHosts, w.knownHostsBrowse,
-		w.password, w.passwordToggle, w.passphrase, w.passphraseToggle,
-		w.readOnly, w.autoConnect, w.remember, w.insecure,
-		w.saveButton, w.testButton, w.deleteButton, w.connectButton, w.disconnectButton,
+		w.list, w.newButton, w.editButton, w.deleteButton, w.connectButton, w.disconnectButton,
 		w.connectAllButton, w.disconnectAllButton, w.closeToTray, w.startup, w.cacheButton, w.exitButton,
 	})
 	var client rect
@@ -575,7 +537,7 @@ func (w *window) isTextInput(h uintptr) bool {
 }
 
 func (w *window) cancelEditorChanges() {
-	if !w.dirty || box(w.hwnd, "저장되지 않은 연결 설정 변경을 버릴까요?", 0x134) != 6 {
+	if !w.dirty || box(w.dialogOwner(), "저장되지 않은 연결 설정 변경을 버릴까요?", 0x134) != 6 {
 		return
 	}
 	if w.selected >= 0 {
@@ -615,7 +577,7 @@ func (w *window) clearDirty() {
 }
 
 func (w *window) browsePath(target uintptr, title string, filter []uint16) {
-	path, selected, err := chooseFile(w.hwnd, title, strings.TrimSpace(getText(target)), filter)
+	path, selected, err := chooseFile(w.dialogOwner(), title, strings.TrimSpace(getText(target)), filter)
 	if err != nil {
 		w.report(err)
 		return
@@ -646,7 +608,7 @@ func (w *window) confirmProfileChange() bool {
 	if !w.dirty {
 		return true
 	}
-	choice := box(w.hwnd, "현재 연결 설정의 변경 사항을 저장할까요?\n\n예: 저장 후 이동\n아니요: 변경 사항을 버리고 이동\n취소: 현재 편집 화면 유지", 0x233)
+	choice := box(w.dialogOwner(), "현재 연결 설정의 변경 사항을 저장할까요?\n\n예: 저장 후 닫기\n아니요: 변경 사항을 버리고 닫기\n취소: 설정 창 유지", 0x233)
 	return allowProfileChange(true, int(choice), w.save)
 }
 
@@ -658,6 +620,11 @@ func (w *window) setBusy(value bool) {
 	}
 	for _, h := range w.controls {
 		call("EnableWindow", h, enabled)
+	}
+	if activeProfileEditor != nil {
+		for _, h := range activeProfileEditor.controls {
+			call("EnableWindow", h, enabled)
+		}
 	}
 	call("EnableWindow", w.status, 1)
 	if !value {
@@ -759,9 +726,11 @@ func (w *window) task(fn func() error, done func(error)) {
 
 func (w *window) report(err error) {
 	if err != nil {
-		w.show()
+		if activeProfileEditor == nil {
+			w.show()
+		}
 		setText(w.status, err.Error())
-		alert(w.hwnd, err.Error())
+		alert(w.dialogOwner(), err.Error())
 	} else {
 		setText(w.status, "작업 완료")
 	}
@@ -841,6 +810,7 @@ func (w *window) refreshList() {
 	}
 	w.loading = wasLoading
 	w.updateActionButtons()
+	w.updateTrayTooltip()
 }
 
 type profileButtonState struct {
@@ -882,6 +852,7 @@ func (w *window) updateActionButtons() {
 		enabled bool
 	}{
 		{w.saveButton, state.save},
+		{w.editButton, w.selected >= 0 && w.selected < len(w.settings.Profiles)},
 		{w.deleteButton, state.delete},
 		{w.connectButton, state.connect},
 		{w.disconnectButton, state.disconnect},
@@ -913,7 +884,25 @@ func normalizedDriveLetter(value string) string {
 }
 
 func trayProfileLabel(saved config.SavedProfile, state string) string {
-	return fmt.Sprintf("%s: %s — %s", normalizedDriveLetter(saved.Profile.DriveLetter), saved.Profile.Name, state)
+	connected := "X"
+	if state == "연결됨" {
+		connected = "O"
+	}
+	return fmt.Sprintf("[%s] %s: %s", connected, normalizedDriveLetter(saved.Profile.DriveLetter), saved.Profile.Name)
+}
+
+func trayTooltip(profiles []config.SavedProfile, state func(string) string) string {
+	letters := make([]string, 0, len(profiles))
+	for _, saved := range profiles {
+		if state(saved.ID) == "연결됨" {
+			letters = append(letters, normalizedDriveLetter(saved.Profile.DriveLetter))
+		}
+	}
+	slices.Sort(letters)
+	if len(letters) == 0 {
+		return "DK-Drive"
+	}
+	return "DK-Drive [" + strings.Join(letters, " ") + "]"
 }
 
 func driveLetterMask(letter string) uint32 {
@@ -1161,10 +1150,10 @@ func (w *window) save() bool {
 		w.report(errors.New("새 자격 증명을 입력하거나 저장 체크를 해제하세요; 기존 암호화 값을 빈 값으로 바꾸지 않습니다"))
 		return false
 	}
-	if p.InsecureSkipTLSVerify && box(w.hwnd, "서버 신원과 인증서 신뢰 검증을 건너뜁니다. 신뢰할 수 있는 테스트 서버에만 사용하세요. 저장할까요?", 0x34) != 6 {
+	if p.InsecureSkipTLSVerify && box(w.dialogOwner(), "서버 신원과 인증서 신뢰 검증을 건너뜁니다. 신뢰할 수 있는 테스트 서버에만 사용하세요. 저장할까요?", 0x34) != 6 {
 		return false
 	}
-	if (p.Protocol == config.ProtocolFTP || p.WebDAVScheme == "http") && box(w.hwnd, "이 연결은 비밀번호와 파일 내용을 평문으로 전송합니다. 저장할까요?", 0x34) != 6 {
+	if (p.Protocol == config.ProtocolFTP || p.WebDAVScheme == "http") && box(w.dialogOwner(), "이 연결은 비밀번호와 파일 내용을 평문으로 전송합니다. 저장할까요?", 0x34) != 6 {
 		return false
 	}
 	var saved config.SavedProfile
@@ -1230,8 +1219,9 @@ func (w *window) deleteProfile() {
 	}
 	delete(w.sessionSecrets, p.ID)
 	w.settings = next
-	w.newProfile()
+	w.selected = -1
 	w.refreshList()
+	setText(w.status, "연결 설정을 삭제했습니다.")
 }
 
 func (w *window) connect(index int) {
@@ -1302,6 +1292,11 @@ func (w *window) connectAll(auto bool) {
 
 func (w *window) exit() {
 	if w.busy {
+		return
+	}
+	if activeRecovery != nil && activeRecovery.busy {
+		call("SetForegroundWindow", activeRecovery.hwnd)
+		alert(activeRecovery.hwnd, "원격 재시도가 끝난 뒤 프로그램을 종료하세요")
 		return
 	}
 	w.disconnect(w.settings.Profiles, true)
@@ -1405,7 +1400,18 @@ func (w *window) handleListNotification(value uintptr) bool {
 	// without uintptr arithmetic and use it only during this callback.
 	pointer := *(*unsafe.Pointer)(unsafe.Pointer(&value))
 	header := (*notifyHeader)(pointer)
-	if header.WindowFrom != w.list || header.Code != lvnItemChanged {
+	if header.WindowFrom != w.list {
+		return false
+	}
+	if header.Code == -3 { // NM_DBLCLK
+		if w.selected >= 0 {
+			if err := showProfileEditor(w, w.selected); err != nil {
+				w.report(err)
+			}
+		}
+		return true
+	}
+	if header.Code != lvnItemChanged {
 		return false
 	}
 	if w.loading {
@@ -1414,7 +1420,10 @@ func (w *window) handleListNotification(value uintptr) bool {
 	notification := (*notifyListView)(pointer)
 	if notification.Item >= 0 && notification.Changed&lvifState != 0 &&
 		notification.NewState&lvisSelected != 0 && notification.OldState&lvisSelected == 0 {
-		w.loadEditor(int(notification.Item))
+		w.selected = int(notification.Item)
+		p := w.settings.Profiles[w.selected]
+		setText(w.status, profileDiagnosticText(w.manager.Diagnostic(p.ID), w.cacheUsage.Profiles[p.ID]))
+		w.updateActionButtons()
 	}
 	return true
 }
@@ -1446,9 +1455,15 @@ func (w *window) command(id, notice int, control uintptr) {
 	}
 	switch id {
 	case idNew:
-		if w.confirmProfileChange() {
-			w.show()
-			w.newProfile()
+		w.show()
+		if err := showProfileEditor(w, -1); err != nil {
+			w.report(err)
+		}
+	case idEditProfile:
+		if w.selected >= 0 {
+			if err := showProfileEditor(w, w.selected); err != nil {
+				w.report(err)
+			}
 		}
 	case idSave:
 		w.save()
@@ -1474,7 +1489,7 @@ func (w *window) command(id, notice int, control uintptr) {
 			w.report(err)
 			return
 		}
-		if (p.InsecureSkipTLSVerify || p.Protocol == config.ProtocolFTP || p.WebDAVScheme == "http") && box(w.hwnd, "평문 전송 또는 인증서 검증 우회 설정입니다. 신뢰할 수 있는 테스트 서버에 연결할까요?", 0x34) != 6 {
+		if (p.InsecureSkipTLSVerify || p.Protocol == config.ProtocolFTP || p.WebDAVScheme == "http") && box(w.dialogOwner(), "평문 전송 또는 인증서 검증 우회 설정입니다. 신뢰할 수 있는 테스트 서버에 연결할까요?", 0x34) != 6 {
 			return
 		}
 		w.task(func() error {
@@ -1489,6 +1504,7 @@ func (w *window) command(id, notice int, control uintptr) {
 			w.report(err)
 			if err == nil {
 				setText(w.status, "연결·원격 시작 경로 확인 통과 (파일 변경·마운트 없음)")
+				box(w.dialogOwner(), "연결·원격 시작 경로 확인을 통과했습니다.\n\n파일 변경이나 드라이브 연결은 수행하지 않았습니다.", 0x40)
 			}
 		})
 	case idDelete:
