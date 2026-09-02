@@ -472,6 +472,7 @@ func (w *window) trayMenu() {
 	add(drives, 0, idNew, "드라이브 추가")
 	add(drives, 0, idConnectAll, "전체 연결")
 	add(drives, 0, idDisconnectAll, "전체 해제")
+	add(cacheMenu, 0, idRecovery, "캐시 확인")
 	add(cacheMenu, 0, idOpenCacheFolder, "폴더 열기")
 	add(cacheMenu, 0, idClearCache, "캐시 정리")
 

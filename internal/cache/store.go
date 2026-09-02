@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -78,9 +80,21 @@ type Usage struct {
 
 type Store struct {
 	directory string
+	limits    Limits
 }
 
+type Limits struct {
+	MaxFileBytes  int64
+	MaxTotalBytes int64
+}
+
+var resizeMutex sync.Mutex
+
 func New(directory string) (*Store, error) {
+	return NewWithLimits(directory, Limits{})
+}
+
+func NewWithLimits(directory string, limits Limits) (*Store, error) {
 	if strings.TrimSpace(directory) == "" {
 		var err error
 		directory, err = DefaultDirectory()
@@ -95,7 +109,7 @@ func New(directory string) (*Store, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("캐시 폴더 생성 실패: %w", err)
 	}
-	return &Store{directory: directory}, nil
+	return &Store{directory: directory, limits: limits}, nil
 }
 
 func DefaultDirectory() (string, error) {
@@ -146,6 +160,93 @@ func (store *Store) CreateStaging() (*os.File, error) {
 		return nil, fmt.Errorf("캐시 임시 파일 생성 실패: %w", err)
 	}
 	return file, nil
+}
+
+// LockResize serializes quota checks with the following file size change.
+// Callers must invoke the returned unlock function after the write or truncate.
+func (store *Store) LockResize(stagingPath string, newSize int64) (func(), error) {
+	if newSize < 0 {
+		return nil, errors.New("캐시 파일 크기는 음수일 수 없습니다")
+	}
+	resizeMutex.Lock()
+	unlock := func() { resizeMutex.Unlock() }
+	if store.limits.MaxFileBytes > 0 && newSize > store.limits.MaxFileBytes {
+		unlock()
+		return nil, fmt.Errorf("캐시 파일당 최대 용량 %d바이트를 초과했습니다: %w", store.limits.MaxFileBytes, syscall.ENOSPC)
+	}
+	path, err := store.safeStagingPath(stagingPath)
+	if err != nil {
+		unlock()
+		return nil, err
+	}
+	currentSize := int64(0)
+	if info, statErr := os.Lstat(path); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			unlock()
+			return nil, fmt.Errorf("일반 파일이 아닌 캐시 크기는 변경할 수 없습니다: %s", path)
+		}
+		currentSize = info.Size()
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		unlock()
+		return nil, fmt.Errorf("캐시 파일 크기 확인 실패: %w", statErr)
+	}
+	if store.limits.MaxTotalBytes > 0 && newSize > currentSize {
+		usage, usageErr := store.totalRegularBytes()
+		if usageErr != nil {
+			unlock()
+			return nil, usageErr
+		}
+		growth := newSize - currentSize
+		if usage > store.limits.MaxTotalBytes-growth {
+			unlock()
+			return nil, fmt.Errorf("캐시 전체 최대 용량 %d바이트를 초과했습니다: %w", store.limits.MaxTotalBytes, syscall.ENOSPC)
+		}
+	}
+	return unlock, nil
+}
+
+func (store *Store) totalRegularBytes() (int64, error) {
+	entries, err := os.ReadDir(store.directory)
+	if err != nil {
+		return 0, fmt.Errorf("캐시 사용량 확인 실패: %w", err)
+	}
+	var total int64
+	for _, entry := range entries {
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return 0, fmt.Errorf("캐시 항목 크기 확인 실패: %s: %w", entry.Name(), infoErr)
+		}
+		if info.Mode()&os.ModeSymlink == 0 && info.Mode().IsRegular() {
+			total += info.Size()
+		}
+	}
+	return total, nil
+}
+
+// PruneExpired removes only valid preserved recovery items. Active staging and
+// entries without trustworthy metadata are never deleted automatically.
+func (store *Store) PruneExpired(retentionDays int, now time.Time) (int, error) {
+	if retentionDays <= 0 {
+		return 0, errors.New("캐시 보관 기간은 1일 이상이어야 합니다")
+	}
+	items, err := store.Scan()
+	if err != nil {
+		return 0, err
+	}
+	cutoff := now.UTC().AddDate(0, 0, -retentionDays)
+	removed := 0
+	var result error
+	for _, item := range items {
+		if item.Metadata.RecoveryState != StatePreserved || item.Metadata.PreservedAt.IsZero() || item.Metadata.PreservedAt.After(cutoff) {
+			continue
+		}
+		if err := store.Delete(item); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		removed++
+	}
+	return removed, result
 }
 
 func (store *Store) Preserve(value Preservation) (RecoveryItem, error) {

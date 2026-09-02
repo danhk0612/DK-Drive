@@ -17,6 +17,12 @@ type Options struct {
 	ProfileName string
 	Protocol    string
 	RemotePath  string
+	CacheLimits CacheLimits
+}
+
+type CacheLimits struct {
+	MaxFileBytes  int64
+	MaxTotalBytes int64
 }
 
 type Manager interface {

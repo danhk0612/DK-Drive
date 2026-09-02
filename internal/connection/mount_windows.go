@@ -5,14 +5,19 @@ package connection
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/danhk0612/DK-Drive/internal/config"
 	"github.com/danhk0612/DK-Drive/internal/mount"
 	"github.com/winfsp/go-winfsp"
 	"golang.org/x/sys/windows"
-	"strings"
 )
 
 func Mount(ctx context.Context, profileID string, p config.Profile, secret config.Secrets) (Session, error) {
+	return MountWithCacheLimits(ctx, profileID, p, secret, mount.CacheLimits{})
+}
+
+func MountWithCacheLimits(ctx context.Context, profileID string, p config.Profile, secret config.Secrets, cacheLimits mount.CacheLimits) (Session, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
@@ -38,6 +43,7 @@ func Mount(ctx context.Context, profileID string, p config.Profile, secret confi
 	s, err := mount.StartSession(backend, mount.Options{
 		DriveLetter: letter, VolumeName: p.Name, ReadOnly: p.ReadOnly,
 		ProfileID: profileID, ProfileName: p.Name, Protocol: string(p.Protocol), RemotePath: p.RemotePath,
+		CacheLimits: cacheLimits,
 	}, p.Protocol == config.ProtocolSFTP)
 	if err != nil {
 		backend.Close()
