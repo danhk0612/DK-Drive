@@ -123,7 +123,7 @@ func Upload(ctx context.Context, store *localcache.Store, item localcache.Recove
 		}
 		offset += int64(read)
 	}
-	if err := errors.Join(writer.Sync(), writer.Close()); err != nil {
+	if err := syncAndClose(writer); err != nil {
 		return vfs.Entry{}, fmt.Errorf("원격 재시도 반영 실패: %w", err)
 	}
 	entry, err := backend.Stat(ctx, remotePath)
@@ -134,6 +134,15 @@ func Upload(ctx context.Context, store *localcache.Store, item localcache.Recove
 		return entry, fmt.Errorf("재시도 결과 크기가 일치하지 않습니다: 로컬 %d B, 원격 %d B", info.Size(), entry.Size)
 	}
 	return entry, nil
+}
+
+func syncAndClose(writer vfs.WriteHandle) error {
+	syncErr := writer.Sync()
+	closeErr := writer.Close()
+	if syncErr != nil && closeErr != nil && syncErr.Error() == closeErr.Error() {
+		closeErr = nil
+	}
+	return errors.Join(syncErr, closeErr)
 }
 
 func AlternatePath(remotePath string, at time.Time) string {

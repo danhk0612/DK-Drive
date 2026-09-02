@@ -93,6 +93,23 @@ func TestUploadRejectsPrematureEOF(t *testing.T) {
 	}
 }
 
+func TestSyncAndCloseDeduplicatesSameError(t *testing.T) {
+	want := errors.New("WebDAV PUT 응답: 409 Conflict")
+	writer := &failingWriter{syncErr: want, closeErr: errors.New(want.Error())}
+	err := syncAndClose(writer)
+	if err == nil || err.Error() != want.Error() {
+		t.Fatalf("syncAndClose() = %v, want one %q", err, want)
+	}
+}
+
+func TestSyncAndCloseKeepsDifferentErrors(t *testing.T) {
+	writer := &failingWriter{syncErr: errors.New("sync failed"), closeErr: errors.New("close failed")}
+	err := syncAndClose(writer)
+	if err == nil || err.Error() != "sync failed\nclose failed" {
+		t.Fatalf("syncAndClose() = %v", err)
+	}
+}
+
 func TestAlternatePath(t *testing.T) {
 	at := time.Date(2026, 9, 1, 15, 4, 5, 0, time.UTC)
 	if got := AlternatePath("folder/report.txt", at); got != "folder/report.recovered-20260901-150405.txt" {
@@ -169,6 +186,15 @@ type memoryWriter struct {
 	name    string
 	data    []byte
 }
+
+type failingWriter struct {
+	syncErr  error
+	closeErr error
+}
+
+func (*failingWriter) WriteAt(data []byte, _ int64) (int, error) { return len(data), nil }
+func (writer *failingWriter) Sync() error                        { return writer.syncErr }
+func (writer *failingWriter) Close() error                       { return writer.closeErr }
 
 func (writer *memoryWriter) WriteAt(data []byte, offset int64) (int, error) {
 	end := int(offset) + len(data)

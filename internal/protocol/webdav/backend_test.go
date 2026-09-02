@@ -179,6 +179,44 @@ func TestResponseErrorMapsFileSystemErrors(t *testing.T) {
 	}
 }
 
+func TestResponseErrorOmitsHTMLBody(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusConflict,
+		Status:     "409 Conflict",
+		Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+		Body:       io.NopCloser(strings.NewReader("<!DOCTYPE html><html><body>server detail</body></html>")),
+	}
+	err := responseError(http.MethodPut, response)
+	if got, want := err.Error(), "WebDAV PUT 응답: 409 Conflict"; got != want {
+		t.Fatalf("responseError() = %q, want %q", got, want)
+	}
+}
+
+func TestResponseErrorDetectsHTMLWithoutContentType(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusConflict,
+		Status:     "409 Conflict",
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("<html><body>server detail</body></html>")),
+	}
+	if err := responseError(http.MethodPut, response); strings.Contains(err.Error(), "server detail") {
+		t.Fatalf("responseError() exposed HTML body: %q", err)
+	}
+}
+
+func TestResponseErrorKeepsPlainTextBody(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusConflict,
+		Status:     "409 Conflict",
+		Header:     http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
+		Body:       io.NopCloser(strings.NewReader("parent collection is missing")),
+	}
+	err := responseError(http.MethodPut, response)
+	if got, want := err.Error(), "WebDAV PUT 응답: 409 Conflict: parent collection is missing"; got != want {
+		t.Fatalf("responseError() = %q, want %q", got, want)
+	}
+}
+
 func TestCapabilities(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method == "PROPFIND" {
