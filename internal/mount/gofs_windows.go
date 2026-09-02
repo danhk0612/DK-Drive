@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/winfsp/go-winfsp/gofs"
+	"golang.org/x/sys/windows"
 
 	localcache "github.com/danhk0612/DK-Drive/internal/cache"
 	"github.com/danhk0612/DK-Drive/internal/vfs"
@@ -89,7 +90,7 @@ func (filesystem *goFileSystem) OpenFile(name string, flag int, perm os.FileMode
 	if exists && flag&os.O_TRUNC == 0 {
 		unlock, limitErr := filesystem.cacheStore.LockResize(temporaryPath, entry.Size)
 		if limitErr != nil {
-			return nil, limitErr
+			return nil, mountBoundaryError(limitErr)
 		}
 		downloadErr := filesystem.download(name, temporaryPath)
 		unlock()
@@ -300,7 +301,7 @@ func (file *stagedFile) Write(buffer []byte) (int, error) {
 	}
 	unlock, err := file.filesystem.cacheStore.LockResize(file.temporaryPath, newSize)
 	if err != nil {
-		return 0, err
+		return 0, mountBoundaryError(err)
 	}
 	defer unlock()
 	file.markDirtyLocked()
@@ -320,7 +321,7 @@ func (file *stagedFile) WriteAt(buffer []byte, offset int64) (int, error) {
 	newSize := max(info.Size(), offset+int64(len(buffer)))
 	unlock, err := file.filesystem.cacheStore.LockResize(file.temporaryPath, newSize)
 	if err != nil {
-		return 0, err
+		return 0, mountBoundaryError(err)
 	}
 	defer unlock()
 	file.markDirtyLocked()
@@ -332,7 +333,7 @@ func (file *stagedFile) Truncate(size int64) error {
 	defer file.mutex.Unlock()
 	unlock, err := file.filesystem.cacheStore.LockResize(file.temporaryPath, size)
 	if err != nil {
-		return err
+		return mountBoundaryError(err)
 	}
 	defer unlock()
 	file.markDirtyLocked()
@@ -578,6 +579,15 @@ func cleanMountPath(name string) string {
 		return "."
 	}
 	return name
+}
+
+// go-winfsp does not currently translate syscall.ENOSPC. Preserve ENOSPC for
+// Go callers while exposing STATUS_DISK_FULL at the WinFsp boundary.
+func mountBoundaryError(err error) error {
+	if errors.Is(err, syscall.ENOSPC) {
+		return errors.Join(windows.STATUS_DISK_FULL, err)
+	}
+	return err
 }
 
 func recoveryRemotePath(root, name string) string {
