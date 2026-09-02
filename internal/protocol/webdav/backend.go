@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -412,6 +413,9 @@ func unsupported(operation string) error {
 func responseError(method string, response *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 	detail := strings.TrimSpace(string(body))
+	if responseBodyIsHTML(response.Header.Get("Content-Type"), detail) {
+		detail = ""
+	}
 	message := fmt.Sprintf("WebDAV %s 응답: %s", method, response.Status)
 	if detail != "" {
 		message += ": " + detail
@@ -426,6 +430,16 @@ func responseError(method string, response *http.Response) error {
 	default:
 		return errors.New(message)
 	}
+}
+
+func responseBodyIsHTML(contentType, body string) bool {
+	if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
+		if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
+			return true
+		}
+	}
+	lower := strings.ToLower(strings.TrimSpace(body))
+	return strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html")
 }
 
 type putHandle struct {
