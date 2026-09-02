@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/winfsp/go-winfsp/gofs"
+	"golang.org/x/sys/windows"
 
 	localcache "github.com/danhk0612/DK-Drive/internal/cache"
 	"github.com/danhk0612/DK-Drive/internal/vfs"
@@ -146,12 +147,24 @@ func TestStagingFileRejectsWriteBeyondCacheLimit(t *testing.T) {
 	}
 	if _, err := file.Write([]byte("123456")); !errors.Is(err, syscall.ENOSPC) {
 		t.Fatalf("Write() error = %v, want ENOSPC", err)
+	} else {
+		assertDiskFullStatus(t, err)
 	}
 	if err := file.Truncate(6); !errors.Is(err, syscall.ENOSPC) {
 		t.Fatalf("Truncate() error = %v, want ENOSPC", err)
+	} else {
+		assertDiskFullStatus(t, err)
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertDiskFullStatus(t *testing.T, err error) {
+	t.Helper()
+	var status windows.NTStatus
+	if !errors.As(err, &status) || status != windows.STATUS_DISK_FULL {
+		t.Fatalf("error = %v, want STATUS_DISK_FULL", err)
 	}
 }
 
