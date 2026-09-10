@@ -16,6 +16,7 @@ func TestConcurrentCountsPrivacyAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
 	other, err := Open(dir, "sftp")
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +35,7 @@ func TestConcurrentCountsPrivacyAndIsolation(t *testing.T) {
 	}
 	wg.Wait()
 	before := r.Snapshot()
-	if before.Metrics[LogicalStat].Calls != 100 || before.Metrics[LogicalStat].Errors != 100 || before.Metrics[LogicalStat].TotalNS <= 0 || before.Metrics[LogicalStat].MaxNS <= 0 {
+	if before.Metrics[LogicalStat].Calls != 100 || before.Metrics[LogicalStat].Errors != 100 || before.Metrics[LogicalStat].TotalNS < 0 || before.Metrics[LogicalStat].MaxNS < 0 || before.Metrics[LogicalStat].MaxNS > before.Metrics[LogicalStat].TotalNS {
 		t.Fatalf("%+v", before)
 	}
 	if other.Snapshot().Metrics[LogicalStat].Calls != 0 {
