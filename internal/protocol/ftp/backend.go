@@ -18,6 +18,7 @@ import (
 
 	ftpclient "github.com/jlaffaye/ftp"
 
+	"github.com/danhk0612/DK-Drive/internal/diagnostics"
 	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
@@ -32,14 +33,15 @@ const (
 )
 
 type Config struct {
-	Host      string
-	Port      uint16
-	Username  string
-	Password  string
-	Root      string
-	Timeout   time.Duration
-	TLSMode   TLSMode
-	TLSConfig *tls.Config
+	Diagnostics *diagnostics.Recorder
+	Host        string
+	Port        uint16
+	Username    string
+	Password    string
+	Root        string
+	Timeout     time.Duration
+	TLSMode     TLSMode
+	TLSConfig   *tls.Config
 }
 
 type Backend struct {
@@ -163,13 +165,13 @@ func (backend *Backend) Stat(ctx context.Context, name string) (vfs.Entry, error
 	if remote == backend.root {
 		return vfs.Entry{Name: path.Base(backend.root), Mode: fs.ModeDir | 0o755}, nil
 	}
-	entry, statErr := client.GetEntry(remote)
+	entry, statErr := diagnostics.Call(backend.config.Diagnostics, diagnostics.FTPGetEntry, func() (*ftpclient.Entry, error) { return client.GetEntry(remote) })
 	if statErr != nil && isConnectionError(statErr) {
 		if reconnectErr := backend.reconnectLocked(ctx); reconnectErr != nil {
 			return vfs.Entry{}, reconnectErr
 		}
 		client = backend.client
-		entry, statErr = client.GetEntry(remote)
+		entry, statErr = diagnostics.Call(backend.config.Diagnostics, diagnostics.FTPGetEntry, func() (*ftpclient.Entry, error) { return client.GetEntry(remote) })
 	}
 	if statErr == nil {
 		return entryFromFTP(entry), nil
@@ -178,13 +180,13 @@ func (backend *Backend) Stat(ctx context.Context, name string) (vfs.Entry, error
 		backend.needsProbe = true
 		return vfs.Entry{}, fmt.Errorf("FTP 경로 조회 실패: %w", statErr)
 	}
-	entries, listErr := client.List(path.Dir(remote))
+	entries, listErr := diagnostics.Call(backend.config.Diagnostics, diagnostics.FTPList, func() ([]*ftpclient.Entry, error) { return client.List(path.Dir(remote)) })
 	backend.needsProbe = true
 	if listErr != nil && isConnectionError(listErr) {
 		if reconnectErr := backend.reconnectLocked(ctx); reconnectErr != nil {
 			return vfs.Entry{}, reconnectErr
 		}
-		entries, listErr = backend.client.List(path.Dir(remote))
+		entries, listErr = diagnostics.Call(backend.config.Diagnostics, diagnostics.FTPList, func() ([]*ftpclient.Entry, error) { return backend.client.List(path.Dir(remote)) })
 		backend.needsProbe = true
 	}
 	if listErr != nil {
@@ -209,13 +211,13 @@ func (backend *Backend) ReadDir(ctx context.Context, name string) ([]vfs.Entry, 
 	}
 	defer backend.mutex.Unlock()
 
-	items, err := client.List(remote)
+	items, err := diagnostics.Call(backend.config.Diagnostics, diagnostics.FTPList, func() ([]*ftpclient.Entry, error) { return client.List(remote) })
 	backend.needsProbe = true
 	if err != nil && isConnectionError(err) {
 		if reconnectErr := backend.reconnectLocked(ctx); reconnectErr != nil {
 			return nil, reconnectErr
 		}
-		items, err = backend.client.List(remote)
+		items, err = diagnostics.Call(backend.config.Diagnostics, diagnostics.FTPList, func() ([]*ftpclient.Entry, error) { return backend.client.List(remote) })
 		backend.needsProbe = true
 	}
 	if err != nil {
