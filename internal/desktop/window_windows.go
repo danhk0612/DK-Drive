@@ -53,6 +53,8 @@ const (
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
 var active *window
 
+const windowsSessionCleanupTimeout = 2 * time.Second
+
 type taskResult struct {
 	err     error
 	done    func(error)
@@ -389,13 +391,16 @@ func wndProc(h uintptr, msg uint32, wp, lp uintptr) uintptr {
 				w.trayMenu()
 			}
 			return 0
-		case 0x11: // WM_QUERYENDSESSION: never discard live mounts during logoff.
-			if w.busy || (activeRecovery != nil && activeRecovery.busy) || w.anyConnected() {
-				w.show()
-				setText(w.status, "Windows 종료 전에 DK-Drive에서 모든 드라이브를 해제하고 종료하세요.")
+		case wmQueryEndSession:
+			// Never veto Windows logoff or shutdown. Cleanup belongs to
+			// WM_ENDSESSION because another application can still cancel it.
+			return 1
+		case wmEndSession:
+			if wp == 0 {
 				return 0
 			}
-			return 1
+			w.finishWindowsSession()
+			return 0
 		}
 		if w.taskbarCreated != 0 && msg == w.taskbarCreated {
 			if !w.tray(true) {
@@ -1309,6 +1314,24 @@ func (w *window) exit() {
 		return
 	}
 	w.disconnect(w.settings.Profiles, true)
+}
+
+func (w *window) finishWindowsSession() {
+	profiles := append([]config.SavedProfile(nil), w.settings.Profiles...)
+	done := make(chan struct{})
+	go func() {
+		disconnectProfilesForSessionEnd(w.manager, profiles)
+		close(done)
+	}()
+	timer := time.NewTimer(windowsSessionCleanupTimeout)
+	select {
+	case <-done:
+		timer.Stop()
+	case <-timer.C:
+	}
+	if call("IsWindow", w.hwnd) != 0 {
+		call("DestroyWindow", w.hwnd)
+	}
 }
 
 func (w *window) disconnect(profiles []config.SavedProfile, exiting bool) {

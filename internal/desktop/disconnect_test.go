@@ -92,6 +92,22 @@ func TestDisconnectForceFailureKeepsSession(t *testing.T) {
 	}
 }
 
+func TestSessionEndDisconnectDoesNotRequireConfirmation(t *testing.T) {
+	safe := &disconnectSession{}
+	busy := &disconnectSession{normalErr: errors.New("open handle")}
+	m, profiles := disconnectFixture(t, safe, busy)
+	result := disconnectProfilesForSessionEnd(m, profiles)
+	if result.err != nil || len(result.canceled) != 0 {
+		t.Fatal(result)
+	}
+	if safe.normal != 1 || safe.forced != 0 || busy.normal != 1 || busy.forced != 1 {
+		t.Fatal("wrong calls", safe, busy)
+	}
+	if m.State("X") != "연결 안 됨" || m.State("Y") != "연결 안 됨" {
+		t.Fatal("session end left a connection mounted")
+	}
+}
+
 func TestForcePromptNamesDriveAndDataRisk(t *testing.T) {
 	p := config.SavedProfile{Profile: config.Profile{Name: "test profile", DriveLetter: "Y"}}
 	text := forceDisconnectPrompt(p, errors.New("open handles"))
