@@ -24,6 +24,8 @@ const (
 	wmGetMinMaxInfo             = 0x24
 	wmKeyDown                   = 0x100
 	wmClose                     = 0x10
+	wmQueryEndSession           = 0x11
+	wmEndSession                = 0x16
 	wmDestroy                   = 2
 	wmTaskDone                  = 0x8001
 	wmTray                      = 0x8002
