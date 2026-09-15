@@ -71,3 +71,47 @@ jobs:
           if ($product.ProductVersion -ne $info.version -or $product.FileVersion -ne "$($info.version).0") { throw 'Version resource mismatch.' }
           $numeric = "$($product.FileMajorPart).$($product.FileMinorPart).$($product.FileBuildPart).$($product.FilePrivatePart)"
           if ($numeric -ne "$($info.version).0") { throw 'Numeric file version mismatch.' }
+
+      - name: Retain verified Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    # Publication requires the explicitly authorized release marker on main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release v0.9.0]')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: dist
+      - name: Verify release provenance and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib, json, os, pathlib, zipfile
+          archive = pathlib.Path('dist/DK-Drive-0.9.0-windows-amd64.zip')
+          expected = pathlib.Path(str(archive) + '.sha256').read_text().split()[0]
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
+          with zipfile.ZipFile(archive) as z:
+              info = json.loads(z.read('build-info.json').decode('utf-8-sig'))
+              assert info['version'] == '0.9.0' and not info['modified']
+              assert info['commit'] == os.environ['GITHUB_SHA']
+              expected_exe = z.read('SHA256SUMS.txt').decode().split()[0]
+              assert hashlib.sha256(z.read('dkdrive.exe')).hexdigest() == expected_exe
+          PYCODE
+          gh release create v0.9.0 dist/*.zip dist/*.zip.sha256 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'DK-Drive 0.9.0' --notes-file docs/releases/v0.9.0.md --draft
+          gh release edit v0.9.0 --repo "$GITHUB_REPOSITORY" --draft=false --latest
