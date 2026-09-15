@@ -18,6 +18,11 @@ import (
 )
 
 func OpenBackend(ctx context.Context, p config.Profile, s config.Secrets) (vfs.Backend, error) {
+	return openConnectionBackend(ctx, p, s, false)
+}
+
+// Recovery and connection tests use fresh metadata; only mounted sessions cache it.
+func openConnectionBackend(ctx context.Context, p config.Profile, s config.Secrets, cacheMetadata bool) (vfs.Backend, error) {
 	protocol := string(p.Protocol)
 	if p.Protocol == config.ProtocolFTPS {
 		protocol = "explicit-ftps"
@@ -33,6 +38,9 @@ func OpenBackend(ctx context.Context, p config.Profile, s config.Secrets) (vfs.B
 	if err != nil {
 		_ = recorder.Close()
 		return nil, err
+	}
+	if cacheMetadata {
+		backend = vfs.NewMetadataCache(backend)
 	}
 	return vfs.WithDiagnostics(backend, recorder), nil
 }

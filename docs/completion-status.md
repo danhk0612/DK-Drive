@@ -81,8 +81,20 @@ HTTP Transport 변경은 메타데이터 최적화 뒤에도 요청 자체가 �
 
 제한된 환경변수 진단 모드와 counting backend·프로토콜 계측 자동 테스트를 추가했다.
 기준 코드 분석 항목의 “아직 없다”는 Phase 1 시작 시점의 상태다.
-[Windows 기준 측정 절차](metadata-performance-validation.md)에 따라 실환경 결과를
-받은 뒤 캐시 구현 여부를 판단한다. 캐시 및 성능 개선은 아직 완료하지 않았다.
+2026-09-15 WebDAV·Explicit FTPS 기준 결과를 받아 Phase 3–6을 구현했다.
+[측정 결과와 캐시 재검증 절차](metadata-cache-validation.md)를 따른다.
+SFTP 기준 결과와 실제 개선 후 Windows 성능 비교는 아직 없다.
+
+## Phase 3–6 메타데이터 캐시
+
+GUI 마운트 연결마다 Stat/ReadDir 2초, 명확한 NotFound 500ms 캐시를 적용한다.
+ReadDir 자식 정보를 Stat에서 재사용하며, 생성·삭제·이동·속성·쓰기와 실패에서
+관련 경로를 무효화한다. 동일 요청 병합과 호출별 취소, 세대별 오래된 응답 차단을
+구현했다. 복구 충돌 검사는 캐시 없이 원격을 조회한다. 외부 의존성은 추가하지 않았다.
+
+Linux 전체 테스트·VFS/WebDAV race·vet·Windows GUI 교차 빌드가 통과했다.
+Windows 전용 dirty 쓰기 가시성과 업로드 실패 보존 테스트를 추가했다.
+실제 탐색기 속도·일반 해제·원격 변경 가시성은 Windows 결과를 받아 판정한다.
 
 ## 실환경 및 사용자 결정이 필요한 사항
 

@@ -32,7 +32,7 @@ func MountWithCacheLimits(ctx context.Context, profileID string, p config.Profil
 	if err := winfsp.LoadWinFSP(); err != nil {
 		return nil, fmt.Errorf("WinFsp 런타임을 불러올 수 없습니다. WinFsp 설치를 확인하세요: %w", err)
 	}
-	backend, err := OpenBackend(ctx, p, secret)
+	backend, err := openConnectionBackend(ctx, p, secret, true)
 	if err != nil {
 		return nil, err
 	}
