@@ -2,8 +2,9 @@
 
 ## 현재 단계
 
-Phase 2 계측만 구현했다. 메타데이터 캐시·요청 병합·HTTP Transport 설정은 아직
-변경하지 않았다. Windows 결과가 중복 요청 가설과 일치하는지 확인한 뒤 Phase 3으로 진행한다.
+이 문서는 캐시 적용 전 Phase 2 기준 측정 절차를 보존한다.
+2026-09-15 기준 자료 수신 후 캐시·요청 병합을 구현했다. 이후 실행은
+[캐시 재검증 절차](metadata-cache-validation.md)를 사용한다. HTTP Transport는 변경하지 않았다.
 
 `DKDRIVE_DIAGNOSTICS`에 출력 디렉터리를 지정한 GUI 실행에서만 계측한다.
 연결마다 임의 이름의 JSON 하나를 만들고 backend가 닫힐 때 최종 집계를 기록한다.

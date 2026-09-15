@@ -81,8 +81,30 @@ HTTP Transport 변경은 메타데이터 최적화 뒤에도 요청 자체가 �
 
 제한된 환경변수 진단 모드와 counting backend·프로토콜 계측 자동 테스트를 추가했다.
 기준 코드 분석 항목의 “아직 없다”는 Phase 1 시작 시점의 상태다.
-[Windows 기준 측정 절차](metadata-performance-validation.md)에 따라 실환경 결과를
-받은 뒤 캐시 구현 여부를 판단한다. 캐시 및 성능 개선은 아직 완료하지 않았다.
+2026-09-15 WebDAV·Explicit FTPS 기준 결과를 받아 Phase 3–6을 구현했다.
+[측정 결과와 캐시 재검증 절차](metadata-cache-validation.md)를 따른다.
+WebDAV·Explicit FTPS 후속 집계와 사용자 체감 개선을 확인했다. SFTP 결과는 없다.
+
+## Phase 3–6 메타데이터 캐시
+
+GUI 마운트 연결마다 Stat/ReadDir 2초, 명확한 NotFound 500ms 캐시를 적용한다.
+ReadDir 자식 정보를 Stat에서 재사용하며, 생성·삭제·이동·속성·쓰기와 실패에서
+관련 경로를 무효화한다. 동일 요청 병합과 호출별 취소, 세대별 오래된 응답 차단을
+구현했다. 복구 충돌 검사는 캐시 없이 원격을 조회한다. 외부 의존성은 추가하지 않았다.
+
+Linux 전체 테스트·VFS/WebDAV race·vet·Windows GUI 교차 빌드가 통과했다.
+Windows 전용 dirty 쓰기 가시성과 업로드 실패 보존 테스트를 추가했다.
+[Windows CI](https://github.com/danhk0612/DK-Drive/actions/runs/34929528685)도 통과했다.
+
+## Phase 7–9 후속 상태 (2026-09-15)
+
+WebDAV 원격 Depth 0은 5,643→42회, Explicit FTPS GetEntry는 5,614→31회로
+감소했으며 사용자가 탐색이 훨씬 빨라졌다고 확인했다. 정확한 시간 배수와
+폴더 규모별 비교, SFTP 결과는 없다. 읽기 전용 쓰기 차단과 해제 후 정상 쓰기를
+확인했다. 기존 파일 덮어쓰기·이동·삭제 차단, 저장 직후 가시성·일반 해제는 별도 대기다.
+[다음 수동 확인](metadata-cache-validation.md)의 한 묶음으로 진행한다.
+HTTP Transport 변경은 현재 근거가 없어 보류한다. 로그인·종료·실제 전송 실패 복구와
+제품 버전·회사명 확정, 배포 준비는 여전히 남아 있다.
 
 ## 실환경 및 사용자 결정이 필요한 사항
 
