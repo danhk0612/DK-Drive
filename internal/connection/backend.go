@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/danhk0612/DK-Drive/internal/config"
+	"github.com/danhk0612/DK-Drive/internal/diagnostics"
 	ftpbackend "github.com/danhk0612/DK-Drive/internal/protocol/ftp"
 	sftpbackend "github.com/danhk0612/DK-Drive/internal/protocol/sftp"
 	webdavbackend "github.com/danhk0612/DK-Drive/internal/protocol/webdav"
@@ -17,6 +18,26 @@ import (
 )
 
 func OpenBackend(ctx context.Context, p config.Profile, s config.Secrets) (vfs.Backend, error) {
+	protocol := string(p.Protocol)
+	if p.Protocol == config.ProtocolFTPS {
+		protocol = "explicit-ftps"
+		if p.FTPSMode == "implicit-ftps" {
+			protocol = "implicit-ftps"
+		}
+	}
+	recorder, err := diagnostics.Open(os.Getenv("DKDRIVE_DIAGNOSTICS"), protocol)
+	if err != nil {
+		return nil, errors.New("진단 폴더를 생성하거나 열 수 없습니다")
+	}
+	backend, err := openBackend(ctx, p, s, recorder)
+	if err != nil {
+		_ = recorder.Close()
+		return nil, err
+	}
+	return vfs.WithDiagnostics(backend, recorder), nil
+}
+
+func openBackend(ctx context.Context, p config.Profile, s config.Secrets, recorder *diagnostics.Recorder) (vfs.Backend, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
@@ -37,7 +58,7 @@ func OpenBackend(ctx context.Context, p config.Profile, s config.Secrets) (vfs.B
 		if err != nil {
 			return nil, errors.New("known_hosts 파일을 확인하세요; 호스트 키 검증은 생략하지 않습니다")
 		}
-		c := sftpbackend.Config{Host: p.Host, Port: p.Port, Username: p.Username, Root: p.RemotePath, Timeout: 10 * time.Second, HostKeyCallback: callback}
+		c := sftpbackend.Config{Diagnostics: recorder, Host: p.Host, Port: p.Port, Username: p.Username, Root: p.RemotePath, Timeout: 10 * time.Second, HostKeyCallback: callback}
 		if p.AuthMethod == config.AuthPrivateKey {
 			c.Signer, err = sftpbackend.LoadPrivateKey(p.PrivateKey, []byte(s.Passphrase))
 			if err != nil {
@@ -52,9 +73,9 @@ func OpenBackend(ctx context.Context, p config.Profile, s config.Secrets) (vfs.B
 		if scheme == "" {
 			scheme = "https"
 		}
-		return webdavbackend.New(ctx, webdavbackend.Config{Scheme: scheme, Host: p.Host, Port: p.Port, Username: p.Username, Password: s.Password, Root: p.RemotePath, Timeout: 30 * time.Second, InsecureSkipTLSVerify: p.InsecureSkipTLSVerify})
+		return webdavbackend.New(ctx, webdavbackend.Config{Diagnostics: recorder, Scheme: scheme, Host: p.Host, Port: p.Port, Username: p.Username, Password: s.Password, Root: p.RemotePath, Timeout: 30 * time.Second, InsecureSkipTLSVerify: p.InsecureSkipTLSVerify})
 	case config.ProtocolFTP, config.ProtocolFTPS:
-		c := ftpbackend.Config{Host: p.Host, Port: p.Port, Username: p.Username, Password: s.Password, Root: p.RemotePath, Timeout: 30 * time.Second, TLSMode: ftpbackend.TLSNone}
+		c := ftpbackend.Config{Diagnostics: recorder, Host: p.Host, Port: p.Port, Username: p.Username, Password: s.Password, Root: p.RemotePath, Timeout: 30 * time.Second, TLSMode: ftpbackend.TLSNone}
 		if p.Protocol == config.ProtocolFTPS {
 			c.TLSMode = ftpbackend.TLSExplicit
 			if p.FTPSMode == "implicit-ftps" {

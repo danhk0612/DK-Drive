@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/danhk0612/DK-Drive/internal/diagnostics"
 	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
@@ -42,6 +43,7 @@ const lockBody = `<?xml version="1.0" encoding="utf-8"?>
 </d:lockinfo>`
 
 type Config struct {
+	Diagnostics           *diagnostics.Recorder
 	Scheme                string
 	Host                  string
 	Port                  uint16
@@ -54,11 +56,12 @@ type Config struct {
 }
 
 type Backend struct {
-	client   *http.Client
-	baseURL  *url.URL
-	username string
-	password string
-	timeout  time.Duration
+	diagnostics *diagnostics.Recorder
+	client      *http.Client
+	baseURL     *url.URL
+	username    string
+	password    string
+	timeout     time.Duration
 }
 
 type Capabilities struct {
@@ -88,7 +91,7 @@ func New(ctx context.Context, config Config) (*Backend, error) {
 		Path:   normalizeRoot(config.Root),
 	}
 	backend := &Backend{
-		client: client, baseURL: baseURL, username: config.Username,
+		diagnostics: config.Diagnostics, client: client, baseURL: baseURL, username: config.Username,
 		password: config.Password, timeout: config.Timeout,
 	}
 	entries, err := backend.propfind(ctx, ".", "0")
@@ -288,6 +291,14 @@ func (backend *Backend) propfind(ctx context.Context, name, depth string) ([]vfs
 }
 
 func (backend *Backend) propfindURL(ctx context.Context, resource *url.URL, depth string) ([]davEntry, error) {
+	op := diagnostics.WebDAVDepth0
+	if depth == "1" {
+		op = diagnostics.WebDAVDepth1
+	}
+	return diagnostics.Call(backend.diagnostics, op, func() ([]davEntry, error) { return backend.requestProperties(ctx, resource, depth) })
+}
+
+func (backend *Backend) requestProperties(ctx context.Context, resource *url.URL, depth string) ([]davEntry, error) {
 	request, err := backend.newRequest(ctx, "PROPFIND", resource, bytes.NewBufferString(propfindBody))
 	if err != nil {
 		return nil, fmt.Errorf("WebDAV PROPFIND 요청 생성 실패: %w", err)

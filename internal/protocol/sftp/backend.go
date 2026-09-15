@@ -16,12 +16,14 @@ import (
 	pkgsftp "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/danhk0612/DK-Drive/internal/diagnostics"
 	"github.com/danhk0612/DK-Drive/internal/vfs"
 )
 
 const defaultTimeout = 10 * time.Second
 
 type Config struct {
+	Diagnostics     *diagnostics.Recorder
 	Host            string
 	Port            uint16
 	Username        string
@@ -93,7 +95,7 @@ func connect(ctx context.Context, config Config) (*pkgsftp.Client, *ssh.Client, 
 	}
 
 	root := normalizeRoot(config.Root)
-	info, err := client.Stat(root)
+	info, err := diagnostics.Call(config.Diagnostics, diagnostics.SFTPStat, func() (os.FileInfo, error) { return client.Stat(root) })
 	if err != nil {
 		client.Close()
 		sshClient.Close()
@@ -161,7 +163,7 @@ func (backend *Backend) Stat(ctx context.Context, name string) (vfs.Entry, error
 		return vfs.Entry{}, err
 	}
 	info, err := withReconnect(ctx, backend, func(client *pkgsftp.Client) (os.FileInfo, error) {
-		return client.Stat(remote)
+		return diagnostics.Call(backend.config.Diagnostics, diagnostics.SFTPStat, func() (os.FileInfo, error) { return client.Stat(remote) })
 	})
 	if err != nil {
 		return vfs.Entry{}, err
@@ -178,7 +180,7 @@ func (backend *Backend) ReadDir(ctx context.Context, name string) ([]vfs.Entry, 
 		return nil, err
 	}
 	items, err := withReconnect(ctx, backend, func(client *pkgsftp.Client) ([]os.FileInfo, error) {
-		return client.ReadDir(remote)
+		return diagnostics.Call(backend.config.Diagnostics, diagnostics.SFTPReadDir, func() ([]os.FileInfo, error) { return client.ReadDir(remote) })
 	})
 	if err != nil {
 		return nil, err
@@ -305,7 +307,7 @@ func (backend *Backend) SetReadOnly(ctx context.Context, name string, readOnly b
 		return err
 	}
 	_, err = withReconnect(ctx, backend, func(client *pkgsftp.Client) (struct{}, error) {
-		info, err := client.Stat(remote)
+		info, err := diagnostics.Call(backend.config.Diagnostics, diagnostics.SFTPStat, func() (os.FileInfo, error) { return client.Stat(remote) })
 		if err != nil {
 			return struct{}{}, err
 		}
