@@ -48,6 +48,7 @@ const (
 	idOpenCacheFolder
 	idClearCache
 	idProfileClose
+	idAbout
 )
 
 var protocols = []string{"SFTP", "WebDAV HTTPS", "WebDAV HTTP (평문)", "FTP (평문)", "Explicit FTPS", "Implicit FTPS (실서버 미검증)"}
@@ -463,13 +464,14 @@ func (w *window) build() error {
 	w.connectAllButton = button("전체 연결", 16, 390, 282, idConnectAll)
 	w.disconnectAllButton = button("전체 해제", 306, 390, 282, idDisconnectAll)
 	w.closeToTray = checkbox("창 닫으면 트레이로", 16, 435, 300, idCloseToTray)
+	about := button("정보 / 라이선스", 330, 435, 258, idAbout)
 	w.startup = checkbox("Windows 로그인 시 실행", 16, 463, 300, idStartup)
 	w.cacheButton = button("캐시 관리", 16, 500, 282, idRecovery)
 	w.exitButton = button("프로그램 종료", 306, 500, 282, idExit)
 	w.status = add("EDIT", "준비됨", 0x800000|0x800|4|0x40, 16, 540, 572, 50, 0)
 	w.setTabOrder([]uintptr{
 		w.list, w.newButton, w.editButton, w.deleteButton, w.connectButton, w.disconnectButton,
-		w.connectAllButton, w.disconnectAllButton, w.closeToTray, w.startup, w.cacheButton, w.exitButton,
+		w.connectAllButton, w.disconnectAllButton, w.closeToTray, about, w.startup, w.cacheButton, w.exitButton,
 	})
 	var client rect
 	if call("GetClientRect", w.hwnd, uintptr(unsafe.Pointer(&client))) != 0 {
@@ -1551,6 +1553,13 @@ func (w *window) command(id, notice int, control uintptr) {
 		w.connectAll(false)
 	case idDisconnectAll:
 		w.disconnect(w.settings.Profiles, false)
+	case idAbout:
+		notice := fmt.Sprintf("DK-Drive %s\n제작자: %s\nDK-Drive: MIT License\n\n%s\n%s\n\nWinFsp: GPLv3 + FLOSS 예외\n전체 라이선스는 배포 폴더의 licenses와 LICENSE를 참고하세요.\n\nWinFsp 저장소를 열까요?", app.Version, app.Creator, app.WinFspNotice, app.WinFspURL)
+		if box(w.hwnd, notice, 0x24) == 6 {
+			if err := openFolder(app.WinFspURL); err != nil {
+				w.report(err)
+			}
+		}
 	case idRecovery:
 		if err := showRecoveryDialog(w); err != nil {
 			w.report(err)

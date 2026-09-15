@@ -246,3 +246,9 @@ WinFsp 마운트, 복수 프로필 GUI와 트레이 동작을 실제 Windows 환
 
 - 추가 용량 경고 기능이 필요할 경우 경고 시점 (현재 범위에 추가하지 않음)
 - 설치 관리자, 코드 서명과 자동 업데이트 제공 여부
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

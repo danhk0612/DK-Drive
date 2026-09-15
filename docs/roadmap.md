@@ -124,3 +124,9 @@ FTP와 두 FTPS 연결 방식의 목록·읽기·쓰기 백엔드, WinFsp 마운
 설치 관리자, 코드 서명과 자동 업데이트는 구현 전에 범위를 별도로 결정한다.
 
 0.8 이후의 상세 범위는 프로젝트 Work 지침서의 단계 구분을 따른다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

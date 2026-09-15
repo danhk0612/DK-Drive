@@ -9,7 +9,13 @@ import (
 	"unsafe"
 )
 
-func runDesktop(hidden bool) error { return desktop.Run(hidden) }
+func runDesktop(hidden bool) error {
+	ready, err := prepareWinFsp(hidden)
+	if err != nil || !ready {
+		return err
+	}
+	return desktop.Run(hidden)
+}
 
 func showStartupError(err error) {
 	text, title := windows.StringToUTF16Ptr(err.Error()), windows.StringToUTF16Ptr("DK-Drive 시작 실패")

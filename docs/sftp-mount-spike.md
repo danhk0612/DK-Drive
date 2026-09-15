@@ -115,3 +115,9 @@ Windows 탐색기에서도 폴더 목록, 파일 생성, 메모장 저장, 이�
 후 동일한 작업 순서가 정상 동작했다.
 
 이 결과로 0.1 SFTP–WinFsp 기술 검증과 0.2 SFTP 기본 범위를 완료한다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

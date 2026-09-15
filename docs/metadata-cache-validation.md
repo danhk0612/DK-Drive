@@ -150,3 +150,9 @@ HTTP Transport 추가 변경을 뒷받침하는 잔여 병목 근거는 없어 �
 현재 새 빌드의 해당 개별 동작에 대한 명시적 보고는 없으므로 자동 테스트 통과와
 이전 실환경 검증을 구분해 기록한다. 로그인·시스템 종료·실제 업로드 실패 복구는
 캐시 회귀와 별개로 기존 미확인 항목이다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

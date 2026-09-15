@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const Version = "0.9.0"
+const Version = "0.9.1"
 const Creator = "참빛바다"
 
 func Run(args []string) error {
@@ -28,3 +28,6 @@ func run(args []string, output io.Writer) error {
 		return errors.New("지원하지 않는 명령입니다")
 	}
 }
+
+const WinFspNotice = "WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos"
+const WinFspURL = "https://github.com/winfsp/winfsp"

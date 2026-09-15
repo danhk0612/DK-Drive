@@ -105,3 +105,9 @@ go build -o bin/dkdrive-webdav-mount.exe ./cmd/dkdrive-webdav-mount
 현재 WebDAV 마운트의 수정 시간 설정과 파일별 ReadOnly 속성 변경은 구현되지 않았다. 서버별 지원 범위를 확인하기 전에는 해당 속성 변경을 테스트하지 않는다.
 
 연결 전체를 읽기 전용으로 마운트할 때는 `-read-only`를 추가한다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

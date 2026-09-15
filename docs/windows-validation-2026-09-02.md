@@ -271,3 +271,9 @@ PowerShell 출력만 붙인다. 자격 증명과 서버 주소는 제외한다.
 8. 재시도 중 닫기·삭제 차단
 9. 선택 삭제·전체 정리
 10. 로그인 자동 실행·자동 연결
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.
