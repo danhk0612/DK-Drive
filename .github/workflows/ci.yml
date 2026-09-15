@@ -36,6 +36,14 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Verify generated resources
+        shell: pwsh
+        run: |
+          go run ./internal/buildresources ./cmd/dkdrive/resource_windows_amd64.syso
+          if ($LASTEXITCODE -ne 0) { throw 'Resource generation failed.' }
+          git diff --exit-code -- cmd/dkdrive/resource_windows_amd64.syso
+          if ($LASTEXITCODE -ne 0) { throw 'Generated resources are stale.' }
+
       - name: Test
         run: go test ./...
 
@@ -44,3 +52,66 @@ jobs:
 
       - name: Build
         run: go build -ldflags="-H=windowsgui" -o bin/dkdrive.exe ./cmd/dkdrive
+
+      - name: Package and verify archive
+        shell: pwsh
+        run: |
+          ./scripts/package-windows.ps1
+          $archive = Get-ChildItem dist -Filter '*.zip' | Select-Object -First 1
+          $expectedZip = (Get-Content "$($archive.FullName).sha256").Split(' ')[0]
+          if ((Get-FileHash $archive.FullName -Algorithm SHA256).Hash -ne $expectedZip) { throw 'ZIP checksum mismatch.' }
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath dist/verify
+          $expectedExe = (Get-Content dist/verify/SHA256SUMS.txt).Split(' ')[0]
+          if ((Get-FileHash dist/verify/dkdrive.exe -Algorithm SHA256).Hash -ne $expectedExe) { throw 'EXE checksum mismatch.' }
+          $info = Get-Content dist/verify/build-info.json -Raw | ConvertFrom-Json
+          if ($info.modified) { throw 'Package was built from a modified checkout.' }
+
+          $product = (Get-Item dist/verify/dkdrive.exe).VersionInfo
+          if ($product.ProductName -ne 'DK-Drive' -or $product.CompanyName -ne '참빛바다') { throw 'Product identity mismatch.' }
+          if ($product.ProductVersion -ne $info.version -or $product.FileVersion -ne "$($info.version).0") { throw 'Version resource mismatch.' }
+          $numeric = "$($product.FileMajorPart).$($product.FileMinorPart).$($product.FileBuildPart).$($product.FilePrivatePart)"
+          if ($numeric -ne "$($info.version).0") { throw 'Numeric file version mismatch.' }
+
+      - name: Retain verified Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    # Publication requires the explicitly authorized release marker on main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release v0.9.0]')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: dist
+      - name: Verify release provenance and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib, json, os, pathlib, zipfile
+          archive = pathlib.Path('dist/DK-Drive-0.9.0-windows-amd64.zip')
+          expected = pathlib.Path(str(archive) + '.sha256').read_text().split()[0]
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
+          with zipfile.ZipFile(archive) as z:
+              info = json.loads(z.read('build-info.json').decode('utf-8-sig'))
+              assert info['version'] == '0.9.0' and not info['modified']
+              assert info['commit'] == os.environ['GITHUB_SHA']
+              expected_exe = z.read('SHA256SUMS.txt').decode().split()[0]
+              assert hashlib.sha256(z.read('dkdrive.exe')).hexdigest() == expected_exe
+          PYCODE
+          gh release create v0.9.0 dist/*.zip dist/*.zip.sha256 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'DK-Drive 0.9.0' --notes-file docs/releases/v0.9.0.md --draft
+          gh release edit v0.9.0 --repo "$GITHUB_REPOSITORY" --draft=false --latest
