@@ -160,3 +160,9 @@ Passphrase, 개인키 내용과 인증 헤더는 기록하지 않는다.
 [Shell 알림 아이콘](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyiconw),
 [DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata),
 [Run 레지스트리](https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys).
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

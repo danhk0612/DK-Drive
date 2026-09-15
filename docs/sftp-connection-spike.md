@@ -103,3 +103,9 @@ Synology의 사용자 홈, `.ssh`, `authorized_keys` 경로가 다른 사용자�
 가능했지만 쓰기 권한이 없었다. 쓰기가 허용된 사용자 경로를 원격 시작
 경로로 지정한 뒤 검증에 통과했다. 서버별 권한과 공유 경로 구성이 다르므로
 마운트할 경로에서 쓰기 권한을 별도로 확인해야 한다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

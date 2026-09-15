@@ -165,3 +165,9 @@ Get-Process 'dkdrive' -ErrorAction SilentlyContinue # 출력 없음
 이 자동 테스트는 실제 Windows 버퍼, 실행 중인 NAS 전송, 실제 WinFsp 해제와
 확인창 조작을 대신하지 않는다. 위 1~5 결과와 오류 메시지를 모아서 보고한다.
 GUI SFTP·쓰기 전체 시나리오와 실제 로그인 자동 실행 등 기존 미검증 항목도 남겨 둔다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

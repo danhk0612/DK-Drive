@@ -311,3 +311,9 @@ FTP는 인증 정보와 파일 내용이 암호화되지 않는다. 신뢰할 �
 - 전송 후 연결 확인 및 제한적인 재연결 구현; 일반 FTP와 Explicit FTPS 실서버 제어 연결 단절 후 읽기 복구 검증 완료
 - 장시간 단절·전송 중 단절·미반영 쓰기가 있는 상태의 복구 실환경 검증 전
 - 서버별 `MLSD`, `MLST`, UTF-8 및 수동형 연결 차이 검증 전
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

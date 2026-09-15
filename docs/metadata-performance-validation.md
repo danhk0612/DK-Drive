@@ -136,3 +136,9 @@ $DiagnosticDir
 동일 폴더 반복 탐색의 원격 조회 수와 지연이 반복 메타데이터 가설에 부합하면
 Phase 3–6 캐시·자식 메타데이터 재사용·무효화·동시 요청 병합을 구현한다.
 이 단계의 테스트 결과는 캐시 효과나 실제 탐색기 속도 개선의 증거가 아니다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

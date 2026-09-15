@@ -138,3 +138,17 @@ scripts/package-windows.ps1로 앱 버전 조회·Windows amd64 GUI 빌드·ZIP�
 게시 내용은 docs/releases/v0.9.0.md를 기준으로 하며 기존 실환경 미확인 항목은 유지한다.
 CI 게시 단계는 main 커밋의 `[release v0.9.0]` 표시에만 실행된다.
 빌드 커밋·ZIP 및 EXE 체크섬을 재검증하고 첨부가 끝난 초안을 공개한다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.
+
+## 0.9.1 런타임 동봉 및 라이선스 보완
+
+사용자가 필요한 구성요소 동봉과 적절한 라이선스 적용을 승인했다.
+DK-Drive MIT를 유지하고 WinFsp FLOSS 예외에 따라 공식 MSI 원본을 동봉한다.
+UI·문서 저작권 고지와 저장소 링크, 원본 라이선스 및 Go 의존 고지를 포함한다.
+설치가 필요한 경우 사용자 동의로 공식 MSI를 실행한다. 관리자 승인은 Windows가 처리한다.
+서명된 드라이버를 별도로 추출하거나 재포장하지 않는다. 기존 0.9.0은 보존하고 0.9.1로 구분한다.

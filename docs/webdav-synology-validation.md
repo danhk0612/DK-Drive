@@ -245,3 +245,9 @@ $WebDAVPort = 5005
 - 사용자 지정 CA 인증서 파일 미지원
 - `-insecure-skip-tls-verify`는 명시적으로 지정한 경우에만 인증서 검증을 우회
 - 중단된 HTTP 전송 이어받기 미지원
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

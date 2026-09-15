@@ -1,13 +1,16 @@
 # DK-Drive 압축 배포판 사용 안내
 
-현재 버전은 0.9.0, 제작자는 참빛바다다. EXE 파일 버전은 0.9.0.0이다.
+현재 버전은 0.9.1, 제작자는 참빛바다다. EXE 파일 버전은 0.9.1.0이다.
 정식 1.0 전 검증 단계이며 잔여 실환경 검증이 남아 있다.
 빌드 버전·소스 커밋·로컬 수정 여부·Go 버전은 함께 제공되는 build-info.json에 기록한다.
 
 ## 설치와 실행
 
-Windows 10/11 64비트와 WinFsp 2.1 이상이 필요하다. WinFsp는 별도로 설치한다.
-ZIP 전체를 고정 폴더에 풀고 dkdrive.exe를 실행한다. 프로필 저장 후 선택 연결한다.
+Windows 10/11 64비트가 필요하다. 필요한 WinFsp 공식 설치 파일은 ZIP에 포함한다.
+ZIP 전체를 고정 폴더에 풀고 dkdrive.exe를 실행한다. WinFsp를 사용할 수 없으면
+동봉한 공식 설치 파일 실행을 안내한다. 승인 후 설치를 마치고 DK-Drive를 다시 실행한다.
+관리자 승인이 필요할 수 있으며, 설치 프로그램이 재시작을 요구하면 Windows 재시작 후 실행한다.
+이미 정상 설치되어 있으면 설치 과정 없이 바로 실행한다. 프로필 저장 후 선택 연결한다.
 로그인 시 실행을 사용한다면 실행 파일을 이후 이동하지 않는다.
 이 압축 파일에는 설정·비밀번호·복구 캐시가 포함되지 않는다.
 
@@ -48,7 +51,7 @@ WinFsp는 다른 프로그램도 사용할 수 있으므로 DK-Drive 제거와 �
 ZIP 옆 .sha256 파일의 값과 다음 출력의 Hash를 비교한다.
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath '.\DK-Drive-0.9.0-windows-amd64.zip'
+Get-FileHash -Algorithm SHA256 -LiteralPath '.\DK-Drive-0.9.1-windows-amd64.zip'
 ```
 
 압축을 푼 후 dkdrive.exe의 SHA-256을 SHA256SUMS.txt와 비교할 수도 있다.
@@ -62,7 +65,7 @@ Get-FileHash -Algorithm SHA256 -LiteralPath '.\DK-Drive-0.9.0-windows-amd64.zip'
 .\scripts\package-windows.ps1
 ```
 
-산출물은 dist의 ZIP과 .sha256이며, ZIP에는 EXE·라이선스·이 안내서·빌드 정보·EXE 체크섬만 포함한다.
+산출물은 dist의 ZIP과 .sha256이며, ZIP에는 EXE·공식 WinFsp MSI·라이선스 모음·이 안내서·빌드 정보·EXE 체크섬을 포함한다.
 같은 버전으로 다시 실행하면 해당 ZIP과 체크섬을 교체한다.
 같은 커밋·깨끗한 작업 트리·Go 버전·PowerShell 압축 도구 환경을 사용한다.
 -trimpath로 로컬 경로를 제외하고 ZIP 항목 시간을 고정한다. 다른 도구 버전 사이의
@@ -81,3 +84,9 @@ go run ./internal/buildresources ./cmd/dkdrive/resource_windows_amd64.syso
 일반 go build와 패키징 모두 이 리소스를 포함한다. CI에서 리소스를 다시 생성해
 소스와의 일치 여부를 검사하고, 최종 EXE의 제품명·제작자·문자열/숫자 버전을 검증한다.
 아이콘은 기존 창·트레이와 동일한 도형을 16/32/48픽셀로 포함한다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

@@ -5,7 +5,7 @@ Windows 드라이브 문자로 마운트하는 경량 네트워크 드라이브 
 
 ## 현재 상태
 
-현재 버전은 `0.9.0`이며 제작자는 **참빛바다**입니다. 정식 1.0 전 검증 단계입니다. WinFsp 메모리 드라이브와 실제 SFTP 드라이브의
+현재 버전은 `0.9.1`이며 제작자는 **참빛바다**입니다. 정식 1.0 전 검증 단계입니다. WinFsp 메모리 드라이브와 실제 SFTP 드라이브의
 연결·읽기·쓰기·이름 변경·이동·삭제·읽기 전용·자동 재연결을 Windows
 탐색기와 메모장에서 검증했습니다. 기본 로컬 스테이징 캐시와 Windows 수정
 시간·읽기 전용 속성 처리도 검증하여 0.2 SFTP 기본 범위를 완료했습니다.
@@ -45,7 +45,9 @@ CLI는 그대로 유지합니다.
 - Go 1.26 이상(소스 빌드 시)
 - WinFsp 2.1 이상
 
-WinFsp가 설치되지 않은 경우 다음 명령으로 설치할 수 있습니다.
+0.9.1 ZIP에는 공식 WinFsp 설치 파일이 포함됩니다. ZIP 전체를 풀고 DK-Drive를
+실행하면 미설치 시 설치를 안내합니다. 설치 후 DK-Drive를 다시 실행하세요.
+소스 빌드에서 설치 파일을 함께 준비하지 않았다면 다음 명령도 사용할 수 있습니다.
 
 ```powershell
 winget install --exact --id WinFsp.WinFsp
@@ -113,3 +115,9 @@ FTP와 FTPS 연결 및 읽기 검증 방법은
 ## 라이선스
 
 [MIT License](LICENSE)
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

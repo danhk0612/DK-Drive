@@ -350,3 +350,9 @@ Win32 구조체 크기·자동 시작 명령 인용과 Windows 빌드.
 
 화면 배치·DPI·키보드 탐색·Shell 트레이 조작·로그인 후 실행·실제 WinFsp 복수
 마운트는 사용자 PC에서 확인해야 한다. 자동 테스트 통과만으로 완료 처리하지 않는다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.

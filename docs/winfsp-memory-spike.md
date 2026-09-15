@@ -57,3 +57,9 @@ go build -o bin/dkdrive-memfs.exe ./cmd/dkdrive-memfs
 WinFsp 런타임과 `go-winfsp` 네이티브 계층을 이용한 기본 파일 작업이 실제
 Windows 환경에서 동작함을 확인했다. 다음 검증은 SFTP 백엔드를 연결한 뒤
 동일 작업을 원격 서버 대상으로 반복한다.
+
+
+---
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+
+[WinFsp 저장소](https://github.com/winfsp/winfsp) · GPLv3 + FLOSS 예외 적용. DK-Drive 자체는 MIT.
