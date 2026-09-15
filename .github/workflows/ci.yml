@@ -44,3 +44,16 @@ jobs:
 
       - name: Build
         run: go build -ldflags="-H=windowsgui" -o bin/dkdrive.exe ./cmd/dkdrive
+
+      - name: Package and verify archive
+        shell: pwsh
+        run: |
+          ./scripts/package-windows.ps1
+          $archive = Get-ChildItem dist -Filter '*.zip' | Select-Object -First 1
+          $expectedZip = (Get-Content "$($archive.FullName).sha256").Split(' ')[0]
+          if ((Get-FileHash $archive.FullName -Algorithm SHA256).Hash -ne $expectedZip) { throw 'ZIP checksum mismatch.' }
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath dist/verify
+          $expectedExe = (Get-Content dist/verify/SHA256SUMS.txt).Split(' ')[0]
+          if ((Get-FileHash dist/verify/dkdrive.exe -Algorithm SHA256).Hash -ne $expectedExe) { throw 'EXE checksum mismatch.' }
+          $info = Get-Content dist/verify/build-info.json -Raw | ConvertFrom-Json
+          if ($info.modified) { throw 'Package was built from a modified checkout.' }
