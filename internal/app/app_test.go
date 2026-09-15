@@ -22,7 +22,7 @@ func TestDefaultMessageShowsCurrentStage(t *testing.T) {
 		t.Fatalf("run(): %v", err)
 	}
 	message := output.String()
-	if !strings.Contains(message, "DK-Drive "+Version) || !strings.Contains(message, "0.5 프로그램 기능") {
+	if !strings.Contains(message, "DK-Drive "+Version) || !strings.Contains(message, "정식 배포 전 검증") {
 		t.Fatalf("default output = %q", message)
 	}
 }

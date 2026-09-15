@@ -1,6 +1,7 @@
 # DK-Drive 압축 배포판 사용 안내
 
-현재 개발 빌드다. 최종 배포 버전·EXE 제품 정보 확정과 잔여 실환경 검증이 남아 있다.
+현재 버전은 0.9.0, 제작자는 참빛바다다. EXE 파일 버전은 0.9.0.0이다.
+정식 1.0 전 검증 단계이며 잔여 실환경 검증이 남아 있다.
 빌드 버전·소스 커밋·로컬 수정 여부·Go 버전은 함께 제공되는 build-info.json에 기록한다.
 
 ## 설치와 실행
@@ -47,7 +48,7 @@ WinFsp는 다른 프로그램도 사용할 수 있으므로 DK-Drive 제거와 �
 ZIP 옆 .sha256 파일의 값과 다음 출력의 Hash를 비교한다.
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath '.\DK-Drive-0.5.0-dev-windows-amd64.zip'
+Get-FileHash -Algorithm SHA256 -LiteralPath '.\DK-Drive-0.9.0-windows-amd64.zip'
 ```
 
 압축을 푼 후 dkdrive.exe의 SHA-256을 SHA256SUMS.txt와 비교할 수도 있다.
@@ -67,3 +68,16 @@ Get-FileHash -Algorithm SHA256 -LiteralPath '.\DK-Drive-0.5.0-dev-windows-amd64.
 -trimpath로 로컬 경로를 제외하고 ZIP 항목 시간을 고정한다. 다른 도구 버전 사이의
 바이트 단위 동일성은 보장하지 않는다. CI는 압축 해제 후 EXE 체크섬을 검증한다.
 공개 Release 생성이나 업로드는 이 스크립트에서 수행하지 않는다.
+
+## EXE 제품 정보 생성
+
+앱의 internal/app/app.go에 버전과 제작자를 정의한다. 버전을 변경하면 저장소 루트에서
+다음 명령으로 추적 중인 Windows amd64 리소스를 갱신하고 함께 커밋한다.
+
+```powershell
+go run ./internal/buildresources ./cmd/dkdrive/resource_windows_amd64.syso
+```
+
+일반 go build와 패키징 모두 이 리소스를 포함한다. CI에서 리소스를 다시 생성해
+소스와의 일치 여부를 검사하고, 최종 EXE의 제품명·제작자·문자열/숫자 버전을 검증한다.
+아이콘은 기존 창·트레이와 동일한 도형을 16/32/48픽셀로 포함한다.

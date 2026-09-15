@@ -36,6 +36,14 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Verify generated resources
+        shell: pwsh
+        run: |
+          go run ./internal/buildresources ./cmd/dkdrive/resource_windows_amd64.syso
+          if ($LASTEXITCODE -ne 0) { throw 'Resource generation failed.' }
+          git diff --exit-code -- cmd/dkdrive/resource_windows_amd64.syso
+          if ($LASTEXITCODE -ne 0) { throw 'Generated resources are stale.' }
+
       - name: Test
         run: go test ./...
 
@@ -57,3 +65,9 @@ jobs:
           if ((Get-FileHash dist/verify/dkdrive.exe -Algorithm SHA256).Hash -ne $expectedExe) { throw 'EXE checksum mismatch.' }
           $info = Get-Content dist/verify/build-info.json -Raw | ConvertFrom-Json
           if ($info.modified) { throw 'Package was built from a modified checkout.' }
+
+          $product = (Get-Item dist/verify/dkdrive.exe).VersionInfo
+          if ($product.ProductName -ne 'DK-Drive' -or $product.CompanyName -ne '참빛바다') { throw 'Product identity mismatch.' }
+          if ($product.ProductVersion -ne $info.version -or $product.FileVersion -ne "$($info.version).0") { throw 'Version resource mismatch.' }
+          $numeric = "$($product.FileMajorPart).$($product.FileMinorPart).$($product.FileBuildPart).$($product.FilePrivatePart)"
+          if ($numeric -ne "$($info.version).0") { throw 'Numeric file version mismatch.' }

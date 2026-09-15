@@ -7,7 +7,8 @@ import (
 	"os"
 )
 
-const Version = "0.5.0-dev"
+const Version = "0.9.0"
+const Creator = "참빛바다"
 
 func Run(args []string) error {
 	return run(args, os.Stdout)
@@ -15,7 +16,7 @@ func Run(args []string) error {
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		_, err := fmt.Fprintf(output, "DK-Drive %s\n0.5 프로그램 기능 개발 단계입니다. GUI는 Windows에서 실행하세요.\n", Version)
+		_, err := fmt.Fprintf(output, "DK-Drive %s\n정식 배포 전 검증 단계입니다. GUI는 Windows에서 실행하세요.\n", Version)
 		return err
 	}
 
