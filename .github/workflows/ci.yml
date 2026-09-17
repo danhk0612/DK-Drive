@@ -76,6 +76,7 @@ jobs:
           $expectedSetup = (Get-Content "$($setup.FullName).sha256").Split(' ')[0]
           if ((Get-FileHash $setup.FullName -Algorithm SHA256).Hash -ne $expectedSetup) { throw 'Installer checksum mismatch.' }
           $setupProduct = $setup.VersionInfo
+          $setupProduct | Format-List ProductName, CompanyName, ProductVersion, FileDescription, FileVersion
           if ($setupProduct.ProductName -ne 'DK-Drive' -or $setupProduct.CompanyName -ne '참빛바다') { throw 'Installer identity mismatch.' }
           if ($setupProduct.ProductVersion -ne $info.version) { throw 'Installer version mismatch.' }
 
