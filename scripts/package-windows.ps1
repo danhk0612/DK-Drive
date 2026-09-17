@@ -74,8 +74,23 @@ try {
     Compress-Archive -LiteralPath $Files.FullName -DestinationPath $Archive -Force
     $ZipHash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
     "$ZipHash  $(Split-Path -Leaf $Archive)" | Set-Content -LiteralPath "$Archive.sha256" -Encoding ASCII
+    $ISCCCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    $ISCCPath = if ($ISCCCommand) { $ISCCCommand.Source } else { $null }
+    if (-not $ISCCPath) {
+        $Candidate = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+        if (Test-Path -LiteralPath $Candidate) { $ISCCPath = $Candidate }
+    }
+    if (-not $ISCCPath) { throw 'Inno Setup 6 compiler (ISCC.exe) was not found.' }
+    & $ISCCPath '/Qp' "/DAppVersion=$Version" "/DSourceDir=$Stage" "/DOutputDir=$Dist" "/DWinFspFile=$($WinFsp.file)" "/DWinFspSHA256=$($WinFsp.sha256)" (Join-Path $Root 'installer\DK-Drive.iss')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed.' }
+    $Setup = Join-Path $Dist "DK-Drive-$Version-windows-amd64-setup.exe"
+    if (-not (Test-Path -LiteralPath $Setup)) { throw 'Windows installer output is missing.' }
+    $SetupHash = (Get-FileHash -LiteralPath $Setup -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$SetupHash  $(Split-Path -Leaf $Setup)" | Set-Content -LiteralPath "$Setup.sha256" -Encoding ASCII
     Write-Host "Package: $Archive"
     Write-Host "SHA-256: $Archive.sha256"
+    Write-Host "Installer: $Setup"
+    Write-Host "SHA-256: $Setup.sha256"
 }
 finally {
     if ($Stage -and (Test-Path -LiteralPath $Stage)) { Remove-Item -LiteralPath $Stage -Recurse -Force }

@@ -72,6 +72,13 @@ jobs:
           $numeric = "$($product.FileMajorPart).$($product.FileMinorPart).$($product.FileBuildPart).$($product.FilePrivatePart)"
           if ($numeric -ne "$($info.version).0") { throw 'Numeric file version mismatch.' }
 
+          $setup = Get-ChildItem dist -Filter '*-setup.exe' | Select-Object -First 1
+          $expectedSetup = (Get-Content "$($setup.FullName).sha256").Split(' ')[0]
+          if ((Get-FileHash $setup.FullName -Algorithm SHA256).Hash -ne $expectedSetup) { throw 'Installer checksum mismatch.' }
+          $setupProduct = $setup.VersionInfo
+          if ($setupProduct.ProductName.Trim() -ne 'DK-Drive' -or $setupProduct.CompanyName.Trim() -ne '참빛바다') { throw 'Installer identity mismatch.' }
+          if ($setupProduct.ProductVersion.Trim() -ne $info.version) { throw 'Installer version mismatch.' }
+
       - name: Verify bundled runtime and licenses
         shell: pwsh
         run: |
@@ -82,14 +89,23 @@ jobs:
             if (-not (Test-Path "dist/verify/licenses/$name")) { throw "Missing license: $name" }
           }
           if (-not (Get-ChildItem dist/verify/licenses -Filter '*go-winfsp@*-LICENSE.txt')) { throw 'Go wrapper notice is missing.' }
-          $install = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$env:RUNNER_TEMP/winfsp-install.log`"" -Wait -PassThru
-          if ($install.ExitCode -notin @(0, 3010)) {
-            Get-Content "$env:RUNNER_TEMP/winfsp-install.log" -Tail 60
-            throw "WinFsp installation failed: $($install.ExitCode)"
+          $setup = Get-ChildItem dist -Filter '*-setup.exe' | Select-Object -First 1
+          $installed = Join-Path $env:RUNNER_TEMP 'DK-Drive-installed'
+          $install = Start-Process $setup.FullName -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$installed`"" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "DK-Drive installation failed: $($install.ExitCode)" }
+          if (-not (Test-Path "$installed/dkdrive.exe")) { throw 'Installed executable is missing.' }
+          foreach ($name in @('WinFsp-License.txt', 'Go-LICENSE.txt', 'Go-DEPENDENCIES.txt')) {
+            if (-not (Test-Path "$installed/licenses/$name")) { throw "Installed license is missing: $name" }
           }
           $env:DKDRIVE_TEST_INSTALLED_WINFSP = '1'
           go test ./cmd/dkdrive -run TestInstalledWinFspBootstrap -count=1
           if ($LASTEXITCODE -ne 0) { throw 'Installed runtime did not load.' }
+          $uninstall = Get-ChildItem $installed -Filter 'unins*.exe' | Select-Object -First 1
+          $remove = Start-Process $uninstall.FullName -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
+          if ($remove.ExitCode -ne 0) { throw "DK-Drive removal failed: $($remove.ExitCode)" }
+          if (Test-Path "$installed/dkdrive.exe") { throw 'Uninstall left the application executable behind.' }
+          go test ./cmd/dkdrive -run TestInstalledWinFspBootstrap -count=1
+          if ($LASTEXITCODE -ne 0) { throw 'DK-Drive uninstall removed the shared WinFsp runtime.' }
 
       - name: Retain verified Windows package
         uses: actions/upload-artifact@v4
@@ -98,12 +114,14 @@ jobs:
           path: |
             dist/*.zip
             dist/*.zip.sha256
+            dist/*-setup.exe
+            dist/*-setup.exe.sha256
           if-no-files-found: error
           retention-days: 14
 
   publish:
     # Publication requires the explicitly authorized release marker on main.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release v0.9.1]')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release v0.9.2]')
     needs: windows
     runs-on: ubuntu-latest
     permissions:
@@ -122,19 +140,21 @@ jobs:
           set -euo pipefail
           python3 - <<'PYCODE'
           import hashlib, json, os, pathlib, zipfile
-          archive = pathlib.Path('dist/DK-Drive-0.9.1-windows-amd64.zip')
+          archive = pathlib.Path('dist/DK-Drive-0.9.2-windows-amd64.zip')
           expected = pathlib.Path(str(archive) + '.sha256').read_text().split()[0]
           assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
           with zipfile.ZipFile(archive) as z:
               info = json.loads(z.read('build-info.json').decode('utf-8-sig'))
-              assert info['version'] == '0.9.1' and not info['modified']
+              assert info['version'] == '0.9.2' and not info['modified']
               assert info['commit'] == os.environ['GITHUB_SHA']
               runtime = json.loads(pathlib.Path('internal/prerequisite/winfsp.json').read_text())
               assert hashlib.sha256(z.read(runtime['file'])).hexdigest() == runtime['sha256']
               assert 'licenses/WinFsp-License.txt' in z.namelist()
               expected_exe = z.read('SHA256SUMS.txt').decode().split()[0]
               assert hashlib.sha256(z.read('dkdrive.exe')).hexdigest() == expected_exe
+          setup = pathlib.Path('dist/DK-Drive-0.9.2-windows-amd64-setup.exe')
+          expected_setup = pathlib.Path(str(setup) + '.sha256').read_text().split()[0]
+          assert hashlib.sha256(setup.read_bytes()).hexdigest() == expected_setup
           PYCODE
-          gh release create v0.9.1 dist/*.zip dist/*.zip.sha256 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'DK-Drive 0.9.1' --notes-file docs/releases/v0.9.1.md --draft
-          gh release edit v0.9.1 --repo "$GITHUB_REPOSITORY" --draft=false --latest
-          gh release edit v0.9.0 --repo "$GITHUB_REPOSITORY" --notes-file docs/releases/v0.9.0.md
+          gh release create v0.9.2 dist/*.zip dist/*.zip.sha256 dist/*-setup.exe dist/*-setup.exe.sha256 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'DK-Drive 0.9.2' --notes-file docs/releases/v0.9.2.md --draft
+          gh release edit v0.9.2 --repo "$GITHUB_REPOSITORY" --draft=false --latest

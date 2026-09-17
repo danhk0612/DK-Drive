@@ -40,7 +40,7 @@ func prepareWinFsp(hidden bool) (bool, error) {
 	info := prerequisite.WinFsp()
 	installer := filepath.Join(filepath.Dir(exe), info.File)
 	if err := info.Verify(installer); err != nil {
-		return false, fmt.Errorf("WinFsp 설치 파일을 사용할 수 없습니다. ZIP 전체를 풀거나 WinFsp를 별도로 설치하세요: %w", err)
+		return false, fmt.Errorf("WinFsp 설치 파일을 사용할 수 없습니다. 설치형 배포판을 다시 실행하거나 ZIP 전체를 풀고 실행하세요: %w", err)
 	}
 	prompt := "드라이브 연결에 필요한 WinFsp를 사용할 수 없습니다. 함께 제공된 공식 설치 프로그램을 실행할까요?\n\nWindows 관리자 승인이 필요할 수 있습니다. 설치를 마친 뒤 DK-Drive를 다시 실행하세요.\n\n" + app.WinFspNotice + "\n" + app.WinFspURL
 	if prerequisiteMessage(prompt, 0x24) != 6 {
