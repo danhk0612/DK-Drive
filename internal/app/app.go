@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const Version = "0.9.1"
+const Version = "0.9.2"
 const Creator = "참빛바다"
 
 func Run(args []string) error {
