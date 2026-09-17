@@ -2,7 +2,6 @@
 
 현재 버전은 0.9.2, 제작자는 참빛바다다. EXE 파일 버전은 0.9.2.0이다.
 정식 1.0 전 검증 단계이며 잔여 실환경 검증이 남아 있다.
-빌드 버전·소스 커밋·로컬 수정 여부·Go 버전은 함께 제공되는 build-info.json에 기록한다.
 
 ## 설치와 실행
 
@@ -20,9 +19,10 @@ DK-Drive를 Program Files에 설치하고 시작 메뉴와 제거 항목을 등�
 ## 업데이트와 되돌리기
 
 열린 원격 파일을 저장하고 연결을 일반 해제한 뒤 트레이에서 종료한다.
-기존 프로그램 폴더를 보관하고 새 ZIP을 별도 폴더에 풀어 실행한다.
-로그인 시 실행을 사용했다면 새 위치에서 해당 설정을 해제했다가 다시 등록한다.
-이전 버전으로 되돌릴 때도 종료 후 이전 프로그램을 실행한다.
+설치형은 새 설치 프로그램을 실행하면 기존 설정과 복구 캐시를 유지한 채 업데이트한다.
+휴대용은 기존 프로그램 폴더를 보관하고 새 ZIP을 별도 폴더에 풀어 실행한다.
+휴대용에서 로그인 시 실행을 사용했다면 새 위치에서 해당 설정을 해제했다가 다시 등록한다.
+이전 버전으로 되돌릴 때도 먼저 종료한 뒤 이전 설치 프로그램이나 실행 파일을 사용한다.
 설정 형식이 바뀐 미래 버전과의 하위 호환성은 보장하지 않는다.
 
 ## 설정과 실패 파일 복구
@@ -52,7 +52,7 @@ WinFsp는 다른 프로그램도 사용할 수 있으므로 DK-Drive 제거와 �
 
 ## 체크섬 확인
 
-ZIP 옆 .sha256 파일의 값과 다음 출력의 Hash를 비교한다.
+다운로드한 파일 옆 `.sha256` 파일의 값과 다음 출력의 Hash를 비교한다.
 
 ```powershell
 Get-FileHash -Algorithm SHA256 -LiteralPath '.\DK-Drive-0.9.2-windows-amd64-setup.exe'
@@ -61,35 +61,11 @@ Get-FileHash -Algorithm SHA256 -LiteralPath '.\DK-Drive-0.9.2-windows-amd64-setu
 압축을 푼 후 dkdrive.exe의 SHA-256을 SHA256SUMS.txt와 비교할 수도 있다.
 체크섬은 전송 중 손상 확인용이며 코드 서명을 대신하지 않는다.
 
-## 소스에서 패키징
+## 개발자 문서
 
-저장소 루트 PowerShell에서 실행한다. 버전은 앱의 --version 출력 한 곳에서 가져온다.
-
-```powershell
-.\scripts\package-windows.ps1
-```
-
-Inno Setup 6이 필요하다. 산출물은 dist의 설치형 EXE, 휴대용 ZIP과 각 .sha256이다.
-ZIP에는 EXE·공식 WinFsp MSI·라이선스 모음·이 안내서·빌드 정보·EXE 체크섬을 포함한다.
-설치형 EXE는 같은 파일들을 내장하되 WinFsp MSI는 Program Files에 남기지 않는다.
-같은 버전으로 다시 실행하면 기존 산출물과 체크섬을 교체한다.
-같은 커밋·깨끗한 작업 트리·Go 버전·PowerShell 압축 도구 환경을 사용한다.
--trimpath로 로컬 경로를 제외하고 ZIP 항목 시간을 고정한다. 다른 도구 버전 사이의
-바이트 단위 동일성은 보장하지 않는다. CI는 압축 해제 후 EXE 체크섬을 검증한다.
-공개 Release 생성이나 업로드는 이 스크립트에서 수행하지 않는다.
-
-## EXE 제품 정보 생성
-
-앱의 internal/app/app.go에 버전과 제작자를 정의한다. 버전을 변경하면 저장소 루트에서
-다음 명령으로 추적 중인 Windows amd64 리소스를 갱신하고 함께 커밋한다.
-
-```powershell
-go run ./internal/buildresources ./cmd/dkdrive/resource_windows_amd64.syso
-```
-
-일반 go build와 패키징 모두 이 리소스를 포함한다. CI에서 리소스를 다시 생성해
-소스와의 일치 여부를 검사하고, 최종 EXE의 제품명·제작자·문자열/숫자 버전을 검증한다.
-아이콘은 기존 창·트레이와 동일한 도형을 16/32/48픽셀로 포함한다.
+소스 빌드, 구현·검증 상태와 Windows 패키징 절차는
+[개발 및 배포 안내](https://github.com/danhk0612/DK-Drive/blob/main/docs/development.md)에
+별도로 보관한다.
 
 
 ---

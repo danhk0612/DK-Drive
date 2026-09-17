@@ -1,118 +1,87 @@
 # DK-Drive
 
 **DK-Drive (Direct Konnect Drive)**는 SFTP, WebDAV, FTP/FTPS 원격 저장소를
-Windows 드라이브 문자로 마운트하는 경량 네트워크 드라이브 클라이언트입니다.
+Windows 탐색기에서 일반 드라이브처럼 사용할 수 있게 연결하는 프로그램입니다.
 
-## 현재 상태
+현재 버전은 **0.9.2**, 제작자는 **참빛바다**입니다. Windows 10/11 64비트를
+지원하며, 정식 1.0 전 공개 검증 버전입니다.
 
-현재 버전은 `0.9.2`이며 제작자는 **참빛바다**입니다. 정식 1.0 전 검증 단계입니다. WinFsp 메모리 드라이브와 실제 SFTP 드라이브의
-연결·읽기·쓰기·이름 변경·이동·삭제·읽기 전용·자동 재연결을 Windows
-탐색기와 메모장에서 검증했습니다. 기본 로컬 스테이징 캐시와 Windows 수정
-시간·읽기 전용 속성 처리도 검증하여 0.2 SFTP 기본 범위를 완료했습니다.
+## 다운로드와 설치
 
-0.3 WebDAV 백엔드는 HTTP/HTTPS Basic 인증부터 파일 작업, LOCK/UNLOCK,
-읽기/쓰기 및 읽기 전용 WinFsp 마운트까지 Synology와 Windows 탐색기에서
-검증했습니다.
+- [최신 릴리스 다운로드](https://github.com/danhk0612/DK-Drive/releases/latest)
+- 일반 사용자는 `DK-Drive-0.9.2-windows-amd64-setup.exe`를 권장합니다.
+- 설치 없이 사용하려면 `DK-Drive-0.9.2-windows-amd64.zip`을 내려받아 전체 압축을 풉니다.
 
-0.4 FTP/FTPS 백엔드는 FTP, Explicit FTPS, Implicit FTPS의 비밀번호 인증,
-원격 시작 경로, 목록, 읽기, 쓰기와 파일 작업을 모의 서버 자동 테스트로
-검증했습니다. 일반 FTP와 Explicit FTPS는 Synology에서 CLI, WinFsp 기본 파일
-작업, 읽기 전용 기본 동작, 탐색기·메모장과 제어 연결 단절 복구까지 확인했습니다.
-Implicit FTPS 실서버 검증과 확장 장애·읽기 전용 검증은 아직 남아 있습니다.
+설치형 EXE에는 공식 WinFsp 설치 파일이 포함되어 있습니다. WinFsp가 없는 PC에서는
+설치 중 관리자 승인을 받아 함께 설치하며, 이미 설치되어 있으면 이 과정을 건너뜁니다.
+휴대용 ZIP에도 같은 설치 파일이 포함되며, WinFsp가 없으면 실행 시 설치를 안내합니다.
+설치 프로그램과 실행 파일은 아직 코드 서명되지 않았으므로 Windows 경고가 표시될 수
+있습니다.
 
-0.5의 첫 Windows GUI, 복수 연결 관리, 트레이, 설정 저장, 선택적 DPAPI 자격
-증명 저장과 자동 시작/자동 연결을 구현했습니다. FTPS/WebDAV GUI 복수 연결과
-설정 복원·선택적 비밀번호 저장·프로그램 시작 시 자동 연결, Windows 자동 실행
-등록·해제를 실환경에서 확인했습니다. 실제 재로그인 실행과 추가 GUI 검증은 남아
-있습니다. 일반 해제 실패 후 사용자 승인으로 강제 해제하는 흐름도 개별 해제,
-전체 해제의 혼합 선택과 프로그램 종료에서 실환경 검증했습니다. 기존 프로토콜별
-CLI는 그대로 유지합니다.
+## 주요 기능
 
-## 목표 기능
-
-- SFTP 비밀번호/개인키 인증
-- WebDAV HTTP/HTTPS
-- FTP, Explicit FTPS 및 가능한 경우 Implicit FTPS
-- 여러 연결 프로필과 드라이브 문자
+- SFTP 비밀번호 및 개인키 인증
+- HTTP/HTTPS WebDAV
+- FTP, Explicit FTPS, Implicit FTPS
+- 여러 연결 프로필과 드라이브 문자 관리
 - 연결별 읽기 전용, 자동 연결, 자동 재연결
-- 로컬 읽기 캐시와 안전한 쓰기 반영
-- 트레이 상주와 Windows 자동 시작
-- 서버측 이름 변경, 이동, 삭제 최적화
+- Windows 탐색기에서 읽기·쓰기·이름 변경·이동·삭제
+- 서버 측 파일 정보 단기 캐시를 통한 탐색 성능 개선
+- 실패한 쓰기 파일 보존, 내보내기 및 원격 재시도
+- 트레이 상주와 선택적 Windows 로그인 시 실행
 
-## 요구 환경
+## 처음 연결하기
 
-- Windows 10/11 64-bit
-- Go 1.26 이상(소스 빌드 시)
-- WinFsp 2.1 이상
+1. 설치 후 시작 메뉴에서 **DK-Drive**를 실행합니다.
+2. **드라이브 추가**를 눌러 프로토콜과 서버 주소, 계정, 원격 시작 경로,
+   사용할 드라이브 문자를 입력합니다.
+3. 필요하면 읽기 전용, 자동 연결, 비밀번호 저장을 선택합니다.
+4. **저장**한 뒤 목록에서 프로필을 선택하고 **선택 연결**을 누릅니다.
+5. 작업을 마치면 열린 파일을 닫고 **선택 해제**한 뒤 트레이 메뉴에서 종료합니다.
 
-0.9.2 설치형 EXE에는 공식 WinFsp 설치 파일이 내장됩니다. 설치 과정에서 WinFsp가
-없을 때 함께 설치하므로 완료 후 DK-Drive를 바로 실행할 수 있습니다. 휴대용 ZIP에도
-같은 공식 WinFsp 설치 파일이 포함되며, ZIP 전체를 풀고 DK-Drive를 실행하면 미설치 시
-설치를 안내합니다.
-소스 빌드에서 설치 파일을 함께 준비하지 않았다면 다음 명령도 사용할 수 있습니다.
+비밀번호 저장, Windows 로그인 시 실행, 자동 연결은 기본적으로 꺼져 있습니다.
+일반 FTP는 비밀번호와 데이터가 암호화되지 않으므로 가능한 경우 SFTP, HTTPS WebDAV
+또는 FTPS를 사용하세요.
 
-```powershell
-winget install --exact --id WinFsp.WinFsp
-```
+## 업데이트와 제거
 
-## 빌드
+업데이트 전 열린 원격 파일을 저장하고 연결을 정상 해제한 뒤 DK-Drive를 완전히
+종료합니다. 새 설치형 EXE를 실행하면 기존 설정과 복구 캐시는 유지됩니다.
 
-```powershell
-go test ./...
-go vet ./...
-go build -ldflags="-H=windowsgui" -o bin/dkdrive.exe ./cmd/dkdrive
-```
+제거는 Windows **설치된 앱**에서 DK-Drive를 선택합니다. 다른 프로그램도 WinFsp를
+사용할 수 있으므로 DK-Drive 제거 시 WinFsp는 자동 제거하지 않습니다. 설정과 복구
+파일도 자동 삭제하지 않습니다.
 
-Windows에서 인수 없이 실행하면 연결 관리 GUI가 열립니다.
+- 설정: `%APPDATA%\DKDrive\settings.json`
+- 복구 캐시: `%LOCALAPPDATA%\DKDrive\Cache`
 
-```powershell
-.\bin\dkdrive.exe
-```
+## 문제 해결과 복구
 
-프로필을 입력하고 **저장 → 선택 연결** 순으로 사용합니다. 비밀번호 저장과
-Windows 로그인 시 실행, 연결별 자동 연결은 기본 해제되어 있습니다. 상세 동작과
-수동 검증 순서는 [0.5 데스크톱 검증](docs/desktop-validation.md)을 참고하세요.
-버전 확인은 `go run ./cmd/dkdrive --version`으로 할 수 있습니다.
+- 드라이브가 연결되지 않으면 WinFsp 설치 여부와 선택한 드라이브 문자의 중복을
+  확인하고, WinFsp 설치 직후라면 Windows를 재시작합니다.
+- 일반 해제가 실패했을 때 강제 해제하면 아직 원격 서버에 반영되지 않은 데이터가
+  남을 수 있습니다. 가능한 한 일반 해제를 먼저 사용합니다.
+- 업로드에 실패한 파일은 **캐시 관리**에서 먼저 로컬로 내보낸 뒤, 연결이 복구되면
+  원격 재시도를 사용합니다. 충돌 안내가 나오면 원격 파일과 보존본을 확인한 뒤
+  처리합니다.
+- 복구가 끝나기 전에는 캐시 전체 정리를 사용하지 마세요.
 
-WinFsp 메모리 마운트 검증 방법은
-[WinFsp 메모리 마운트 기술 검증](docs/winfsp-memory-spike.md)을 참고하세요.
+## 현재 제한 사항
 
-SFTP 연결과 원격 파일 읽기 검증 방법은
-[SFTP 연결 기술 검증](docs/sftp-connection-spike.md)을 참고하세요.
+- 코드 서명과 자동 업데이트는 아직 제공하지 않습니다.
+- 중단된 파일 전송을 중단 지점부터 이어받지는 않습니다.
+- 파일 내용 읽기 캐시는 없으며 파일 정보는 최대 2초간 재사용하므로 외부 변경은
+  새로고침 후 보일 수 있습니다.
+- Implicit FTPS 실서버, 장시간·전송 중 단절, Windows 로그인·종료의 일부 실환경
+  검증이 남아 있습니다.
+- 저장한 비밀값은 현재 Windows 사용자와 PC에 종속되어 다른 PC에서 재사용할 수
+  없습니다.
 
-SFTP 원격 경로를 WinFsp 드라이브로 마운트하는 검증 방법은
-[SFTP WinFsp 마운트 기술 검증](docs/sftp-mount-spike.md)을 참고하세요.
+## 문서
 
-WebDAV 연결, 파일 작업과 WinFsp 마운트 검증 방법은
-[WebDAV 연결 기술 검증](docs/webdav-connection-spike.md)을 참고하세요.
-실제 Synology와 Windows에서 순차 점검할 명령은
-[Synology WebDAV 통합 검증 체크리스트](docs/webdav-synology-validation.md)에 정리했습니다.
-
-FTP와 FTPS 연결 및 읽기 검증 방법은
-[FTP/FTPS 연결 기술 검증](docs/ftp-connection-spike.md)을 참고하세요.
-
-## 알려진 제한 사항
-
-- SFTP WinFsp 마운트는 기술 검증 단계이며 DK-Drive 로컬 캐시 폴더를 사용
-- 진행 중인 파일 전송 재개 미구현; 실패한 캐시 파일은 사용자가 명시적으로 재시도 가능
-- 원격 파일 내용의 읽기 캐시는 미구현; 로컬 스테이징의 용량 제한과 보존 기간 정리는 지원
-- SFTP에는 별도 생성·접근 시간이 없어 Windows의 생성·접근 시간에 수정 시간을 표시
-- Hidden, System, Archive 등 SFTP에 대응값이 없는 Windows 속성 변경 미지원
-- WebDAV 수정 시간과 파일별 ReadOnly 속성 변경 미지원
-- Implicit FTPS 실서버 검증 전; 장시간 단절·전송 중 복구 검증 전
-- GUI 기본 검증과 WebDAV 쓰기는 완료; 실제 로그인 후 실행은 검증 대기
-- 프로토콜별 GUI 전체 CRUD는 반복하지 않고 공통 GUI와 각 백엔드 검증 결과를 조합
-- GUI 일반 해제 실패 시 강제 해제 확인 (기본: 취소); 미업로드 데이터 손실 가능성 안내
-- 실패한 스테이징 파일의 메타데이터·목록·캐시 폴더 열기·로컬 내보내기,
-  선택 항목 삭제와 사용자 확인 후 전체 캐시 정리, 크기·수정 시각 충돌 확인을 거친
-  명시적 원격 재시도를 지원; 원격 파일 없음과 충돌 3가지 선택을 Windows에서 검증
-- DPAPI 저장 비밀값은 현재 Windows 사용자/PC에 종속; 다른 PC로 복사해 재사용 불가
-- GUI는 연결 관리·별도 프로필 설정·캐시 관리 창을 제공; 고급 탭은 미구현
-
-남은 작업과 검증 경계는 [프로젝트 마무리 기준 상태](docs/completion-status.md),
-개발 순서는 [로드맵](docs/roadmap.md)을 참고하세요. 데스크톱 UI 개선,
-실패 캐시 복구와 배포 준비의 세부 순서·완료 기준은
-[데스크톱 제품화 계획](docs/desktop-product-plan.md)에 정리했습니다.
+- [Windows 배포판 사용 안내](docs/distribution.md)
+- [개발 및 배포 안내](docs/development.md)
+- [릴리스 내역](https://github.com/danhk0612/DK-Drive/releases)
 
 ## 라이선스
 
